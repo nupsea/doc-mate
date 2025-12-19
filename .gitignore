@@ -215,4 +215,4 @@ indexes/
 DEVELOPMENT_PHASES.md
 MIGRATION.md
 GETTING_STARTED.md
-
+notebooks/*.md
