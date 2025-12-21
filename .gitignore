@@ -212,7 +212,6 @@ pgdata
 qdrant_data
 indexes/
 
-DEVELOPMENT_PHASES.md
-MIGRATION.md
-GETTING_STARTED.md
+# Architecture and implementation documentation
+docs/architecture/
 notebooks/*.md

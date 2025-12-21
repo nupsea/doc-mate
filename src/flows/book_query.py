@@ -54,7 +54,7 @@ def search_book_content(query: str, book_identifier: str | int, limit: int = 5):
         # Fetch full chunk details from Qdrant by ID
         chunks_full = retriever.vec.get_chunks_by_ids(chunk_ids)
 
-        # Truncate text (no longer need to filter by book since search already did)
+        # Truncate text and preserve metadata for citations
         chunks_with_text = []
         for chunk in chunks_full:
             text = chunk["text"]
@@ -62,6 +62,7 @@ def search_book_content(query: str, book_identifier: str | int, limit: int = 5):
                 {
                     "id": chunk["id"],
                     "text": text[:800] + "..." if len(text) > 800 else text,
+                    "metadata": chunk.get("metadata", {}),  # Keep metadata for citations
                 }
             )
 

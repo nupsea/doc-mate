@@ -205,7 +205,7 @@ def extract_tables_naive(text):
     else:
         print("No clear table structure found in plain text extraction")
 
-    print("\n⚠️  Note: Plain text extraction often loses table formatting!")
+    print("\n  Note: Plain text extraction often loses table formatting!")
     print("   Tables in PDFs are visual layouts, not structured data.")
     print("   For better results, consider:")
     print("   - PyMuPDF's table extraction (experimental)")
@@ -255,7 +255,7 @@ if __name__ == "__main__":
     print(f"Pages with likely tables: {sum(1 for p in analysis['pages'] if p['likely_has_table'])}")
     print(f"Pages with likely code: {sum(1 for p in analysis['pages'] if p['likely_has_code'])}")
 
-    print("\n⚠️  KEY INSIGHT:")
+    print("\n  KEY INSIGHT:")
     print("PDFs are visual documents, not structured data.")
     print("Text extraction gives you words but loses:")
     print("  - Table structure (rows/columns)")

@@ -111,13 +111,57 @@ Combine them into 1-2 cohesive paragraphs that capture the chapter's key points.
         joined = "\n\n".join(
             [f"Chapter {c['chapter_id']}: {c['summary']}" for c in chapter_summaries]
         )
-        prompt = book_prompt.format(joined=joined)
-        resp = await self.client.chat.completions.create(
-            model="gpt-4o",  # can use bigger model for better synthesis
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-        )
-        return str(resp.choices[0].message.content).strip()
+
+        # Check if combined summaries are too large
+        batches = self.split_text_into_batches(joined, max_tokens=25000)  # Leave room for prompt
+
+        if len(batches) == 1:
+            # Small enough to summarize directly
+            prompt = book_prompt.format(joined=joined)
+            resp = await self.client.chat.completions.create(
+                model="gpt-4o-mini",  # Use mini for cost efficiency
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+            )
+            return str(resp.choices[0].message.content).strip()
+        else:
+            # Document is large, batch the summaries
+            print(f"Document is large ({len(batches)} batches), summarizing in parts...")
+            batch_summaries = []
+
+            for i, batch in enumerate(batches):
+                prompt = book_prompt.format(joined=batch)
+                async with self.semaphore:
+                    resp = await self.client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.3,
+                    )
+                    batch_summaries.append(str(resp.choices[0].message.content).strip())
+
+            # Combine batch summaries into final summary
+            if len(batch_summaries) == 1:
+                return batch_summaries[0]
+
+            combined = "\n\n".join([
+                f"Part {i+1}: {summary}"
+                for i, summary in enumerate(batch_summaries)
+            ])
+
+            # Final synthesis
+            async with self.semaphore:
+                final_prompt = f"""
+These are summaries of different parts of the same document.
+Combine them into 2-3 cohesive paragraphs that capture the document's key themes and content.
+
+{combined}
+"""
+                resp = await self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": final_prompt}],
+                    temperature=0.3,
+                )
+                return str(resp.choices[0].message.content).strip()
 
     async def summarize_hierarchy(self, chunks):
         """

@@ -1,11 +1,14 @@
 """
-Book ingestion pipeline - plain Python script.
+Document ingestion pipeline - supports books, scripts, conversations, tech docs, reports.
+
+Backward compatible with book ingestion.
 """
 
 import asyncio
 from pathlib import Path
 
 from src.content.reader import GutenbergReader, PDFReader
+from src.content.parsers import get_parser
 from src.content.store import PgresStore
 from src.llm.generator import SummaryGenerator
 from src.search.hybrid import FusionRetriever
@@ -40,22 +43,41 @@ def validate_inputs(slug: str, file_path: str, title: str, force_update: bool = 
 def read_and_parse(
     slug: str,
     file_path: str,
+    doc_type: str = 'book',
     split_pattern: str = None,
     max_tokens: int = 500,
     overlap: int = 100,
 ):
-    """Read file and parse into chunks."""
+    """
+    Read file and parse into chunks using appropriate parser.
+
+    Args:
+        doc_type: 'book', 'script', 'conversation', 'tech_doc', 'report'
+        For books: Uses old reader for backward compatibility
+        For other types: Uses new parsers
+    """
     path = Path(file_path)
     file_extension = path.suffix.lower()
 
-    # Choose reader based on file extension
-    if file_extension == ".pdf":
-        reader = PDFReader(file_path, slug, split_pattern=split_pattern)
-    else:
-        # Default to GutenbergReader for .txt files
-        reader = GutenbergReader(file_path, slug, split_pattern=split_pattern)
+    # For books, use old readers (backward compatible)
+    if doc_type == 'book':
+        if file_extension == ".pdf":
+            reader = PDFReader(file_path, slug, split_pattern=split_pattern)
+        else:
+            reader = GutenbergReader(file_path, slug, split_pattern=split_pattern)
+        chunks = reader.parse(max_tokens=max_tokens, overlap=overlap)
 
-    chunks = reader.parse(max_tokens=max_tokens, overlap=overlap)
+    else:
+        # For other types, use new parsers
+        parser = get_parser(file_path, doc_type, slug, split_pattern=split_pattern)
+        parsed = parser.parse()
+        # Different parsers have different chunking parameters
+        if doc_type == 'conversation':
+            chunks = parser.chunk(parsed, max_tokens=max_tokens, overlap_turns=2)
+        elif doc_type == 'script':
+            chunks = parser.chunk(parsed)  # Scripts use scene-based chunking
+        else:
+            chunks = parser.chunk(parsed, max_tokens=max_tokens, overlap=overlap)
 
     return {
         "chunks": chunks,
@@ -85,16 +107,30 @@ def store_to_db(
     num_chars: int,
     chapter_summaries: list,
     book_summary: str,
+    doc_type: str = 'book',
+    metadata: dict = None,
     force_update: bool = False,
 ):
-    """Store book metadata and summaries to database."""
+    """Store document metadata and summaries to database."""
     store = PgresStore()
 
     if force_update and store.book_exists(slug):
         store.delete_book(slug)
 
-    book_id = store.store_book_metadata(slug, title, author, num_chunks, num_chars)
-    store.store_summaries(slug, chapter_summaries, book_summary)
+    # Use new store_document method for multi-format support
+    book_id = store.store_document(
+        slug=slug,
+        title=title,
+        doc_type=doc_type,
+        author=author,
+        num_chunks=num_chunks,
+        num_chars=num_chars,
+        metadata=metadata
+    )
+
+    # Store summaries (works for all doc types)
+    if chapter_summaries and book_summary:
+        store.store_summaries(slug, chapter_summaries, book_summary)
 
     return {"book_id": book_id, "slug": slug}
 
@@ -164,10 +200,11 @@ def verify_ingestion(slug: str, expected_chapters: int):
     }
 
 
-async def ingest_book(
+async def ingest_document(
     slug: str,
     file_path: str,
     title: str,
+    doc_type: str = 'book',
     author: str = None,
     split_pattern: str = None,
     max_tokens: int = 500,
@@ -175,18 +212,31 @@ async def ingest_book(
     force_update: bool = False,
 ):
     """
-    Ingest a book: validate -> parse -> summarize -> store -> build indexes -> verify.
+    Ingest any document type: validate -> parse -> summarize -> store -> build indexes -> verify.
+
+    Args:
+        doc_type: 'book', 'script', 'conversation', 'tech_doc', 'report'
     """
-    print(f"Starting ingestion for: {title} (slug: {slug})")
+    print(f"Starting ingestion for: {title} (type: {doc_type}, slug: {slug})")
 
     validation = validate_inputs(slug, file_path, title, force_update)
     print(f"Validation passed - File size: {validation['file_size']} bytes")
 
-    parse_result = read_and_parse(slug, file_path, split_pattern, max_tokens, overlap)
+    parse_result = read_and_parse(slug, file_path, doc_type, split_pattern, max_tokens, overlap)
     print(
         f"Parsed {parse_result['num_chunks']} chunks, {parse_result['num_chars']} chars"
     )
 
+    # Extract metadata from parser (for non-book types)
+    metadata = None
+    if doc_type != 'book':
+        try:
+            parser = get_parser(file_path, doc_type, slug, split_pattern=split_pattern)
+            metadata = parser.extract_metadata()
+        except:
+            metadata = {}
+
+    # Generate summaries (for all types)
     summary_result = await generate_summaries(parse_result["chunks"])
     print(
         f"Generated {summary_result['num_chapters']} chapter summaries + book summary"
@@ -200,9 +250,11 @@ async def ingest_book(
         parse_result["num_chars"],
         summary_result["chapter_summaries"],
         summary_result["book_summary"],
+        doc_type,
+        metadata,
         force_update,
     )
-    print(f"Stored to database - Book ID: {db_result['book_id']}")
+    print(f"Stored to database - Document ID: {db_result['book_id']}")
 
     search_result = build_search_indexes(parse_result["chunks"])
     print(
@@ -216,11 +268,40 @@ async def ingest_book(
         "slug": slug,
         "book_id": db_result["book_id"],
         "title": title,
+        "doc_type": doc_type,
         "chapters": verify_result["chapters_verified"],
         "chunks": parse_result["num_chunks"],
         "search_indexed": search_result["bm25_indexed"],
         "status": "success",
     }
+
+
+async def ingest_book(
+    slug: str,
+    file_path: str,
+    title: str,
+    author: str = None,
+    split_pattern: str = None,
+    max_tokens: int = 500,
+    overlap: int = 100,
+    force_update: bool = False,
+):
+    """
+    Ingest a book (backward compatible).
+
+    DEPRECATED: Use ingest_document() for multi-format support.
+    """
+    return await ingest_document(
+        slug=slug,
+        file_path=file_path,
+        title=title,
+        doc_type='book',
+        author=author,
+        split_pattern=split_pattern,
+        max_tokens=max_tokens,
+        overlap=overlap,
+        force_update=force_update
+    )
 
 
 if __name__ == "__main__":

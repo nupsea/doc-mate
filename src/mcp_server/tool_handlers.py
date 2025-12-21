@@ -57,18 +57,26 @@ class BookToolHandlers:
             )
             for i, chunk in enumerate(result["chunks"], 1):
                 chunk_id = chunk.get("id", "unknown")
+                metadata = chunk.get("metadata", {})
 
-                # Extract chapter number from chunk_id (format: slug_chapter_chunk_hash)
-                chapter_num = "?"
+                # Extract section number from chunk_id (format: slug_section_chunk_hash)
+                section_num = "?"
                 if "_" in chunk_id:
                     parts = chunk_id.split("_")
                     if len(parts) >= 2:
-                        chapter_num = (
+                        section_num = (
                             parts[1].lstrip("0") or "0"
                         )  # Remove leading zeros
 
-                # Format citation
-                citation = f"[Chapter {chapter_num}, Source: {chunk_id}]"
+                # Format citation based on metadata
+                # Try to use section heading from metadata if available
+                heading = metadata.get("heading", "")
+                if heading and len(heading) < 50:  # Use heading if reasonable length
+                    citation = f"[{heading}, Source: {chunk_id}]"
+                else:
+                    # Fall back to section number
+                    # Use generic "Section" instead of assuming "Chapter"
+                    citation = f"[Section {section_num}, Source: {chunk_id}]"
 
                 output += f"Passage {i} {citation}:\n{chunk['text']}\n\n---\n\n"
 
@@ -169,15 +177,22 @@ class BookToolHandlers:
                     # Format passages for this book
                     for i, chunk in enumerate(result["chunks"], 1):
                         chunk_id = chunk.get("id", "unknown")
+                        metadata = chunk.get("metadata", {})
 
-                        # Extract chapter number
-                        chapter_num = "?"
+                        # Extract section number
+                        section_num = "?"
                         if "_" in chunk_id:
                             parts = chunk_id.split("_")
                             if len(parts) >= 2:
-                                chapter_num = parts[1].lstrip("0") or "0"
+                                section_num = parts[1].lstrip("0") or "0"
 
-                        citation = f"[Chapter {chapter_num}, Source: {chunk_id}]"
+                        # Format citation based on metadata
+                        heading = metadata.get("heading", "")
+                        if heading and len(heading) < 50:
+                            citation = f"[{heading}, Source: {chunk_id}]"
+                        else:
+                            citation = f"[Section {section_num}, Source: {chunk_id}]"
+
                         output += f"Passage {i} {citation}:\n{chunk['text']}\n\n"
 
                 output += "-" * 80 + "\n\n"

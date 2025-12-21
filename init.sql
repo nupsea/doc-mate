@@ -9,8 +9,15 @@ CREATE TABLE IF NOT EXISTS books (
     author TEXT,
     num_chunks INT,
     num_chars INT,
-    added_at TIMESTAMP DEFAULT NOW()
+    doc_type VARCHAR(20) DEFAULT 'book',
+    metadata JSONB DEFAULT '{}'::jsonb,
+    added_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT valid_doc_type CHECK (doc_type IN ('book', 'script', 'conversation', 'tech_doc', 'report'))
 );
+
+-- Indexes for multi-format support
+CREATE INDEX IF NOT EXISTS idx_books_doc_type ON books(doc_type);
+CREATE INDEX IF NOT EXISTS idx_books_metadata ON books USING GIN (metadata);
 
 CREATE TABLE IF NOT EXISTS chapter_summaries (
     book_id INT NOT NULL,
