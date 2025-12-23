@@ -59,6 +59,14 @@ async def test_queries():
         },
         {
             "category": "BASIC",
+            "name": "Comparative query (2 authors - critical test)",
+            "query": "compare Marcus and Homer on bravery",
+            "expected_tool": "search_multiple_books (ONE call)",
+            "expected_books": ["mam", "ili", "ody"],
+            "notes": "CRITICAL: Must include ALL 3 books (Marcus=mam, Homer=ili+ody) in ONE search_multiple_books call"
+        },
+        {
+            "category": "BASIC",
             "name": "Author with multiple books",
             "query": "summarize Homer's work",
             "expected_tool": "get_book_summary for each book",
@@ -221,6 +229,126 @@ async def test_queries():
             "expected_tool": "search_book",
             "expected_books": ["ody"],
             "notes": "Should search for 'hospitality guests hosts customs traditions' with citations"
+        },
+
+        # ===== CONVERSATION DOCUMENTS =====
+        {
+            "category": "CONVERSATION",
+            "name": "Speaker attribution WITH labels",
+            "query": "What does Sarah Chen say in the sample meeting?",
+            "expected_tool": "search_book (stm)",
+            "expected_books": ["stm"],
+            "notes": "Should return passages with [Speakers: Sarah Chen, ...] citations"
+        },
+        {
+            "category": "CONVERSATION",
+            "name": "Speaker attribution WITHOUT labels (negative test)",
+            "query": "What does Anup say in Dec Town Hall?",
+            "expected_tool": "search_book (dth)",
+            "expected_books": ["dth"],
+            "notes": "CRITICAL: Must respond ONLY with 'This document lacks speaker labels. I cannot determine who said what.' NO topics, NO inference"
+        },
+        {
+            "category": "CONVERSATION",
+            "name": "Meeting topic search",
+            "query": "What topics were discussed in the sample meeting about Q1?",
+            "expected_tool": "search_book (stm)",
+            "expected_books": ["stm"],
+            "notes": "Should search for 'Q1 planning budget hiring' and return relevant passages"
+        },
+        {
+            "category": "CONVERSATION",
+            "name": "Compare meetings",
+            "query": "compare the sample meeting and dec town hall on key decisions",
+            "expected_tool": "search_multiple_books (ONE call)",
+            "expected_books": ["stm", "dth"],
+            "notes": "Should use search_multiple_books with both conversation slugs"
+        },
+
+        # ===== TECHNICAL DOCUMENTS =====
+        {
+            "category": "TECH_DOC",
+            "name": "Technical concept search",
+            "query": "What does the design data intensive apps book say about replication?",
+            "expected_tool": "search_book (ddia)",
+            "expected_books": ["ddia"],
+            "notes": "Should search for 'replication consistency distributed' in tech doc"
+        },
+        {
+            "category": "TECH_DOC",
+            "name": "Tech doc chapter summaries",
+            "query": "Give me a chapter breakdown of design data intensive apps",
+            "expected_tool": "get_chapter_summaries (ddia)",
+            "expected_books": ["ddia"],
+            "notes": "Should return chapter-by-chapter structure"
+        },
+        {
+            "category": "TECH_DOC",
+            "name": "Compare tech concepts across books",
+            "query": "compare how the Gita and design data intensive apps approach balance and trade-offs",
+            "expected_tool": "search_multiple_books (ONE call)",
+            "expected_books": ["gita", "ddia"],
+            "notes": "Cross-genre comparison: philosophical vs technical text"
+        },
+
+        # ===== MOVIE SCRIPTS =====
+        {
+            "category": "SCRIPT",
+            "name": "Character dialogue search",
+            "query": "What does Neo say about choice in The Matrix?",
+            "expected_tool": "search_book (matrix)",
+            "expected_books": ["matrix"],
+            "notes": "Should search for 'Neo choice decision free will' in script"
+        },
+        {
+            "category": "SCRIPT",
+            "name": "Script scene analysis",
+            "query": "Describe the red pill blue pill scene in The Matrix",
+            "expected_tool": "search_book (matrix)",
+            "expected_books": ["matrix"],
+            "notes": "Should search for 'red pill blue pill Morpheus choice' and return scene text"
+        },
+
+        # ===== NEGATIVE TESTS =====
+        {
+            "category": "NEGATIVE",
+            "name": "Author not in library",
+            "query": "What does Stephen King say about fear?",
+            "expected_tool": "None (should state unavailable)",
+            "expected_books": [],
+            "notes": "Should respond: 'Stephen King is not in the library.' DO NOT substitute with other authors"
+        },
+        {
+            "category": "NEGATIVE",
+            "name": "Book not in library",
+            "query": "Tell me about Harry Potter",
+            "expected_tool": "None (should state unavailable)",
+            "expected_books": [],
+            "notes": "Should respond that Harry Potter is not in library, NOT search similar books"
+        },
+        {
+            "category": "NEGATIVE",
+            "name": "Comparative with unavailable author",
+            "query": "compare Marcus Aurelius and Viktor Frankl on suffering",
+            "expected_tool": "search_book (mam only)",
+            "expected_books": ["mam"],
+            "notes": "Frankl not in library - should search ONLY Marcus, state Frankl unavailable"
+        },
+        {
+            "category": "NEGATIVE",
+            "name": "Ambiguous query without context",
+            "query": "What happens in chapter 5?",
+            "expected_tool": "None or clarification",
+            "expected_books": [],
+            "notes": "No book context - should ask user to clarify which book"
+        },
+        {
+            "category": "NEGATIVE",
+            "name": "Empty/nonsense query",
+            "query": "xyz abc qwe",
+            "expected_tool": "None",
+            "expected_books": [],
+            "notes": "Should handle gracefully, possibly ask for clarification"
         }
     ]
 
@@ -327,32 +455,46 @@ async def test_queries():
     print("MANUAL REVIEW CHECKLIST (Check agent logs above)")
     print("=" * 90)
     print("\nCRITICAL ISSUES TO VERIFY:")
-    print("1. Comparative queries - Did agent use search_multiple_books (ONE call)?")
+    print()
+    print("1. [BASIC-3] Comparative query 2 authors - MOST CRITICAL TEST")
+    print("   Query: 'compare Marcus and Homer on bravery'")
+    print("   ✓ MUST call search_multiple_books(['mam', 'ili', 'ody']) in ONE call")
+    print("   ✗ NOT: search_book('mam') + search_multiple_books(['ili', 'ody'])")
+    print("   ✗ NOT: search_book('mam') + search_book('ili') + search_book('ody')")
+    print()
+    print("2. Comparative queries - Did agent use search_multiple_books (ONE call)?")
     print("   - NOT multiple search_book calls")
-    print("   - Examples: [BASIC-2], [EDGE CASE-2], [DEMO-2], [DEMO-3], [DEMO-6], [DEMO-8]")
+    print("   - Examples: [BASIC-2], [BASIC-3], [EDGE CASE-2], [CONVERSATION-4], [TECH_DOC-3]")
     print()
-    print("2. Author expansion - Did agent find ALL books by author?")
+    print("3. Author expansion - Did agent find ALL books by author?")
     print("   - Homer → BOTH Iliad AND Odyssey")
-    print("   - Examples: [BASIC-3], [EDGE CASE-2], [DEMO-3]")
+    print("   - Examples: [BASIC-3], [BASIC-4], [EDGE CASE-2], [DEMO-3]")
     print()
-    print("3. Book substitution - Did agent avoid searching unavailable books?")
-    print("   - User asks about Peterson (not in library)")
-    print("   - Should NOT search Hegel or other philosophy books")
-    print("   - Should state \"not in library\" and search ONLY Marcus Aurelius")
-    print("   - Example: [EDGE CASE-1]")
+    print("4. Speaker attribution WITHOUT labels - [CONVERSATION-2] CRITICAL")
+    print("   Query: 'What does Anup say in Dec Town Hall?'")
+    print("   ✓ Response: 'This document lacks speaker labels. I cannot determine who said what.'")
+    print("   ✗ NOT: List topics or infer content")
     print()
-    print("4. Slug formatting - Did agent use slugs correctly?")
+    print("5. Speaker attribution WITH labels - [CONVERSATION-1]")
+    print("   Query: 'What does Sarah Chen say in the sample meeting?'")
+    print("   ✓ Citations should show: [Speakers: Sarah Chen, ...]")
+    print()
+    print("6. Book substitution - Did agent avoid searching unavailable books?")
+    print("   - Examples: [EDGE CASE-1], [NEGATIVE-1], [NEGATIVE-2], [NEGATIVE-3]")
+    print("   - Should state \"not in library\" and NOT substitute with other books")
+    print()
+    print("7. Slug formatting - Did agent use slugs correctly?")
     print("   - Should use: 'mam' (just the slug)")
     print("   - Should NOT use: '[mam]' or 'Meditations'")
     print("   - Check all tool calls in logs")
     print()
-    print("5. Citations - Did responses include proper citations?")
-    print("   - Format: [Chapter X, Source: chunk_id]")
+    print("8. Citations - Did responses include proper citations?")
+    print("   - Format: [Chapter X, Source: chunk_id] or [Speakers: ..., Source: chunk_id]")
     print("   - For comparative queries: citations from ALL books searched")
     print()
-    print("6. Query crafting - Did searches use concrete terms?")
-    print("   - Should transform: 'character arcs' → 'character development growth transformation'")
-    print("   - Should avoid meta-words: 'compare', 'similarities', 'differences'")
+    print("9. Cross-document type comparisons - [TECH_DOC-3]")
+    print("   Query: 'compare Gita and DDIA on balance'")
+    print("   ✓ Should work across philosophical and technical documents")
     print("=" * 90)
 
     # Cleanup - properly close the MCP session

@@ -215,3 +215,6 @@ indexes/
 # Architecture and implementation documentation
 docs/architecture/
 notebooks/*.md
+
+# Phase 1 testing documentation (internal work notes)
+docs/phase1_testing/

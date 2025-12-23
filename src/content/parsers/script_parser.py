@@ -64,7 +64,8 @@ class ScriptParser(DocumentParser):
         if file_path.suffix.lower() == '.pdf':
             return self._read_pdf()
         else:
-            return file_path.read_text(encoding='utf-8')
+            # Use safe encoding detection
+            return self.safe_read_text()
 
     def _read_pdf(self) -> str:
         """Extract text from PDF screenplay."""
@@ -156,6 +157,7 @@ class ScriptParser(DocumentParser):
 
             chunk_text = "\n".join(parts)
             chunk_hash = self.simple_hash(chunk_text)
+            chunk_tokens = len(self.enc.encode(chunk_text))  # Calculate once
 
             # Use consistent ID format: {slug}_{scene:02d}_{chunk:03d}_{hash}
             # Each scene = 1 chunk, so chunk number is always 001
@@ -167,7 +169,7 @@ class ScriptParser(DocumentParser):
                 'text': chunk_text,
                 'hash': chunk_hash,
                 'num_chars': len(chunk_text),
-                'num_tokens': len(self.enc.encode(chunk_text)),
+                'num_tokens': chunk_tokens,
                 'metadata': {
                     'scene_number': scene['scene_number'],
                     'heading': scene['heading']  # Keep for filtering/display

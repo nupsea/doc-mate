@@ -99,7 +99,7 @@ class BookMateAgent:
 
     def _get_available_books(self) -> tuple[str, dict]:
         """
-        Get available books from database.
+        Get available documents from database.
 
         Returns:
             (formatted_list, title_to_slug_map)
@@ -113,7 +113,7 @@ class BookMateAgent:
                 books = cur.fetchall()
 
             if not books:
-                return "No books currently available in the library.", {}
+                return "No documents currently available in the library.", {}
 
             # Create list with slugs (needed for tool calls)
             book_list = "\n".join(
@@ -126,10 +126,10 @@ class BookMateAgent:
             # Create mapping for internal use
             title_to_slug = {title.lower(): slug for slug, title, _ in books}
 
-            return f"Available books (use slug in square brackets for tool calls):\n{book_list}", title_to_slug
+            return f"Available documents (use slug in square brackets for tool calls):\n{book_list}", title_to_slug
         except Exception as e:
-            print(f"[WARN] Could not load book list: {e}")
-            return "Book list unavailable.", {}
+            print(f"[WARN] Could not load document list: {e}")
+            return "Document list unavailable.", {}
 
     async def _handle_tool_calls(
         self,
@@ -575,7 +575,7 @@ async def main():
         await agent.connect_to_mcp_server()
 
         # Test conversation
-        print("\n=== Book Mate Agent ===\n")
+        print("\n=== Doc Mate Agent ===\n")
 
         response, history = await agent.chat(
             "What is the book 'Meditations' about? Use the book identifier 'mma'."

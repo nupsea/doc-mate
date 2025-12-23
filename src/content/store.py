@@ -100,6 +100,22 @@ class PgresStore:
             num_chars=num_chars
         )
 
+    def _sanitize_metadata(self, metadata: dict) -> dict:
+        """Remove null bytes from metadata that PostgreSQL JSONB can't handle."""
+        if not metadata:
+            return {}
+
+        def clean_value(val):
+            if isinstance(val, str):
+                return val.replace('\x00', '')
+            elif isinstance(val, dict):
+                return {k: clean_value(v) for k, v in val.items()}
+            elif isinstance(val, list):
+                return [clean_value(item) for item in val]
+            return val
+
+        return clean_value(metadata)
+
     def store_document(
         self,
         slug: str,
@@ -135,6 +151,9 @@ class PgresStore:
                 metadata={'num_scenes': 150, 'runtime_minutes': 136}
             )
         """
+        # Sanitize metadata to remove null bytes
+        clean_metadata = self._sanitize_metadata(metadata)
+
         with self.conn.cursor() as cur:
             cur.execute(
                 """
@@ -150,7 +169,7 @@ class PgresStore:
                 RETURNING book_id
                 """,
                 (slug, title, author, num_chunks, num_chars, doc_type,
-                 json.dumps(metadata or {})),
+                 json.dumps(clean_metadata)),
             )
             book_id = cur.fetchone()[0]
         self.conn.commit()

@@ -62,8 +62,8 @@ class BookParser(DocumentParser):
         if self.file_path.suffix.lower() == '.pdf':
             return self._read_pdf()
         else:
-            # Assume text file
-            text = self.file_path.read_text(encoding='utf-8')
+            # Assume text file - use safe encoding detection
+            text = self.safe_read_text()
             return self._strip_gutenberg(text)
 
     def _read_pdf(self) -> str:
@@ -175,7 +175,7 @@ class BookParser(DocumentParser):
                 overlap=overlap
             )
 
-            for sub_chunk in chapter_chunks:
+            for sub_chunk, sub_chunk_tokens in chapter_chunks:
                 chunk_index += 1
                 chunk_hash = self.simple_hash(sub_chunk)
 
@@ -183,7 +183,7 @@ class BookParser(DocumentParser):
                     "text": sub_chunk,
                     "hash": chunk_hash,
                     "num_chars": len(sub_chunk),
-                    "num_tokens": len(self.enc.encode(sub_chunk)),
+                    "num_tokens": sub_chunk_tokens,  # Use pre-calculated tokens
                     "metadata": {
                         "chapter": chapter["chapter"],
                         "chapter_title": chapter["title"],
@@ -193,15 +193,20 @@ class BookParser(DocumentParser):
 
         return all_chunks
 
-    def _chunk_text(self, text: str, max_tokens: int, overlap: int) -> List[str]:
-        """Split text into token-based chunks with overlap."""
+    def _chunk_text(self, text: str, max_tokens: int, overlap: int) -> List[tuple]:
+        """
+        Split text into token-based chunks with overlap.
+
+        Returns:
+            List of (chunk_text, token_count) tuples
+        """
         tokens = self.enc.encode(text)
         chunks = []
 
         for i in range(0, len(tokens), max_tokens - overlap):
             chunk_tokens = tokens[i : i + max_tokens]
             chunk_text = self.enc.decode(chunk_tokens)
-            chunks.append(chunk_text)
+            chunks.append((chunk_text, len(chunk_tokens)))
 
         return chunks
 

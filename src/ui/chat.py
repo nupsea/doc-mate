@@ -62,18 +62,18 @@ def create_chat_interface(ui):
     with gr.Column():
         with gr.Row():
             with gr.Column(scale=2):
-                gr.Markdown("### Chat with Books")
+                gr.Markdown("### Chat with Docs")
 
                 with gr.Row():
                     book_dropdown = gr.Dropdown(
-                        choices=[("Select a book...", "none")]
+                        choices=[("Select a doc...", "none")]
                         + [
                             (f"{title}", slug)
                             for slug, title, _, _, _ in get_available_books()
                         ],
                         value="none",
-                        label="Select Book (optional)",
-                        info="Auto-injects book title into queries",
+                        label="Select Doc (optional)",
+                        info="Auto-injects document title into queries",
                         scale=2,
                     )
 
@@ -96,7 +96,7 @@ def create_chat_interface(ui):
 
                 with gr.Row():
                     msg = gr.Textbox(
-                        placeholder="Ask about a book...", show_label=False, scale=9
+                        placeholder="Ask about a document...", show_label=False, scale=9
                     )
                     send_btn = gr.Button("Send", scale=1, variant="primary")
 
@@ -129,9 +129,9 @@ def create_chat_interface(ui):
                 with gr.Accordion("💡 Tips", open=False):
                     gr.Markdown(
                         """
-                        - **Book Selection**: Use dropdown or mention book title in your query
-                        - **Search Examples**: "Find passages about virtue", "What does the author say about courage?"
-                        - **Chapter Context**: Ask about specific chapters or broad themes
+                        - **Doc Selection**: Use dropdown or mention document title in your query
+                        - **Search Examples**: "Find passages about X", "What does the author say about Y?"
+                        - **Section Context**: Ask about specific sections or broad themes
                         - **Hybrid Search**: Uses both keyword matching (BM25) and semantic search
                         - **Rate Responses**: Help improve quality by rating answers
                         """

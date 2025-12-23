@@ -13,6 +13,12 @@ import tiktoken
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
+try:
+    import fitz  # PyMuPDF
+    PYMUPDF_AVAILABLE = True
+except ImportError:
+    PYMUPDF_AVAILABLE = False
+
 from .base import DocumentParser, DocumentType
 
 
@@ -32,7 +38,7 @@ class ConversationParser(DocumentParser):
         Initialize conversation parser.
 
         Args:
-            file_path: Path to conversation file (.txt, .log, .chat)
+            file_path: Path to conversation file (.txt, .log, .chat, .pdf)
             slug: Document identifier
             split_pattern: Optional pattern for turn detection
         """
@@ -57,8 +63,30 @@ class ConversationParser(DocumentParser):
         return DocumentType.CONVERSATION
 
     def read_content(self) -> str:
-        """Read conversation from text file."""
-        return self.file_path.read_text(encoding='utf-8')
+        """Read conversation from text file or PDF."""
+        if self.file_path.suffix.lower() == '.pdf':
+            return self._read_pdf()
+        else:
+            # Use safe encoding detection for text files
+            return self.safe_read_text()
+
+    def _read_pdf(self) -> str:
+        """Extract text from PDF using PyMuPDF."""
+        if not PYMUPDF_AVAILABLE:
+            raise ImportError(
+                "PyMuPDF required for PDF parsing. Install: pip install pymupdf"
+            )
+
+        doc = fitz.open(self.file_path)
+        text_parts = []
+
+        for page in doc:
+            text = page.get_text("text")
+            if text:
+                text_parts.append(text)
+
+        doc.close()
+        return "\n".join(text_parts)
 
     def parse(self) -> List[Dict]:
         """
@@ -157,50 +185,48 @@ class ConversationParser(DocumentParser):
         if not parsed_data:
             return []
 
+        # Pre-calculate token counts (performance optimization)
+        turn_token_counts = [len(self.enc.encode(turn["text"])) for turn in parsed_data]
+
         chunks = []
         chunk_index = 0
+        position = 0
 
-        i = 0
-        while i < len(parsed_data):
-            # Collect turns until we hit max_tokens
+        while position < len(parsed_data):
+            # Collect turns for this chunk
             chunk_turns = []
             chunk_tokens = 0
+            current = position
 
-            while i < len(parsed_data):
-                turn = parsed_data[i]
-                turn_tokens = len(self.enc.encode(turn["text"]))
+            while current < len(parsed_data):
+                turn_tokens = turn_token_counts[current]
 
+                # Stop if adding this turn would exceed limit (and we already have some turns)
                 if chunk_tokens + turn_tokens > max_tokens and chunk_turns:
-                    # Chunk is full
                     break
 
-                chunk_turns.append(turn)
+                chunk_turns.append(parsed_data[current])
                 chunk_tokens += turn_tokens
-                i += 1
+                current += 1
 
+            # Edge case: single turn exceeds max_tokens
             if not chunk_turns:
-                # Single turn exceeds max_tokens, include it anyway
-                chunk_turns = [parsed_data[i]]
-                i += 1
+                chunk_turns = [parsed_data[position]]
+                chunk_tokens = turn_token_counts[position]
+                current = position + 1
 
-            # Build chunk text
+            # Create chunk
             chunk_text = self._build_chunk_text(chunk_turns)
             chunk_index += 1
             chunk_hash = self.simple_hash(chunk_text)
-
-            # Extract speakers
             speakers = list(set(t["speaker"] for t in chunk_turns))
 
-            # Create chunk ID using consistent format: {slug}_{section:02d}_{chunk:03d}_{hash}
-            # For conversations, each chunk = 1 section, chunk number is always 001
-            chunk_id = f"{self.slug}_{chunk_index:02d}_001_{chunk_hash}"
-
             chunks.append({
-                "id": chunk_id,
+                "id": f"{self.slug}_{chunk_index:02d}_001_{chunk_hash}",
                 "text": chunk_text,
                 "hash": chunk_hash,
                 "num_chars": len(chunk_text),
-                "num_tokens": len(self.enc.encode(chunk_text)),
+                "num_tokens": chunk_tokens,
                 "metadata": {
                     "turn_start": chunk_turns[0]["turn"],
                     "turn_end": chunk_turns[-1]["turn"],
@@ -211,9 +237,11 @@ class ConversationParser(DocumentParser):
                 }
             })
 
-            # Backtrack for overlap
-            i -= overlap_turns
+            # Next chunk: move forward with overlap
+            # Always advance by at least 1 to guarantee termination
+            position = max(position + 1, current - overlap_turns)
 
+        print(f"[CHUNK] Completed! Created {len(chunks)} chunks from {len(parsed_data)} turns")
         return chunks
 
     def _build_chunk_text(self, turns: List[Dict]) -> str:

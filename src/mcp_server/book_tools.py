@@ -39,7 +39,7 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="search_book",
-            description="Search for content within a book using hybrid (BM25 + Vector) retrieval. Returns relevant text chunks.",
+            description="Search within a SINGLE document only. DO NOT use for: comparative queries (compare/contrast/differ/between/versus), queries mentioning 2+ authors, queries mentioning 2+ documents. For those, use search_multiple_books instead. Returns relevant text chunks with source citations.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -59,7 +59,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_book_summary",
-            description="Get the overall summary of a book.",
+            description="Get the overall summary of the entire document. Use this when the user asks for a high-level overview of what the whole document is about, its main themes, or general content. Returns a synthesized summary of the complete work.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -73,7 +73,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_chapter_summaries",
-            description="Get summaries of all chapters in a book.",
+            description="Get summaries of all sections/chapters in a document. Use this when the user wants to see the document structure, understand what each section covers, or get a chapter-by-chapter breakdown. Returns summaries for each section in order.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -87,24 +87,24 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="search_multiple_books",
-            description="Search across multiple books simultaneously for comparative analysis. Use this when you need to compare themes, concepts, perspectives, or topics across different authors or works. Returns relevant passages from each book with clear source attribution. TIP: Use concrete, specific search terms for best results. If no results found, consider getting book summaries instead.",
+            description="Search across 2+ documents in ONE call. REQUIRED for: comparative queries (compare/contrast/differ/between/versus), queries with 2+ authors, queries with 2+ documents. Include ALL relevant document slugs in a single call. DO NOT call search_book multiple times instead. Works with all document types. Returns relevant passages from each document with clear source attribution.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The search query to use across all books. Use specific, concrete terms rather than abstract concepts. For better results with comparative questions, include multiple related terms separated by spaces (e.g., 'concept1 concept2 term1 term2' instead of just 'concept1')"
+                        "description": "The search query to use across all documents. Use specific, concrete terms rather than abstract concepts. For better results with comparative questions, include multiple related terms separated by spaces (e.g., 'concept1 concept2 term1 term2' instead of just 'concept1')"
                     },
                     "book_identifiers": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "List of 2-5 book SLUGS to search and compare (e.g., ['abc', 'xyz']). MUST use slugs from [square brackets], NOT titles.",
+                        "description": "List of 2-5 document SLUGS to search and compare (e.g., ['abc', 'xyz']). Can mix document types (e.g., compare a book with a conversation). MUST use slugs from [square brackets], NOT titles.",
                         "minItems": 2,
                         "maxItems": 5
                     },
                     "limit_per_book": {
                         "type": "integer",
-                        "description": "Number of results to return from each book",
+                        "description": "Number of results to return from each document",
                         "default": 3,
                         "minimum": 1,
                         "maximum": 5

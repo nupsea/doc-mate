@@ -1,7 +1,7 @@
 """
 Document ingestion interface component - supports books, scripts, conversations, tech docs, reports.
 
-Backward compatible with book ingestion.
+Backward compatible with document ingestion.
 """
 
 import gradio as gr
@@ -77,7 +77,7 @@ async def ingest_new_book(
 
     if not title.strip():
         return {
-            "output": "Error: Please provide a book title",
+            "output": "Error: Please provide a document title",
             "status": "[ERROR] Error",
             "clear_inputs": False,
         }
@@ -200,6 +200,8 @@ async def ingest_new_book(
         }
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()  # This will print full traceback to docker logs
         return {
             "output": f"[ERROR] Error during ingestion: {str(e)}",
             "status": "[ERROR] Ingestion Failed",
@@ -208,7 +210,7 @@ async def ingest_new_book(
 
 
 def create_ingest_interface():
-    """Create the book ingestion tab interface."""
+    """Create the document ingestion tab interface."""
     from datetime import datetime
 
     with gr.Column():
@@ -237,7 +239,7 @@ def create_ingest_interface():
                 )
 
                 slug_input = gr.Textbox(
-                    label="Book Slug (unique identifier)",
+                    label="Document Slug (unique identifier)",
                     placeholder="mma",
                     info="2-20 chars, lowercase, letters/numbers/-/_ only",
                     max_lines=1,
@@ -246,13 +248,13 @@ def create_ingest_interface():
                 skip_chapters_check = gr.Checkbox(
                     label="Skip chapter detection (use auto-chunking)",
                     value=False,
-                    info="Enable if book has no clear chapters or complex structure",
+                    info="Enable if document has no clear chapters or complex structure",
                 )
 
                 chapter_example_input = gr.Textbox(
                     label="Chapter Pattern Example",
                     placeholder="e.g., CHAPTER I. or II. or BOOK II",
-                    info="Enter any chapter heading from your book, then test pattern. Examples: 'CHAPTER I.', 'BOOK II', 'II.'",
+                    info="Enter any chapter heading from your document, then test pattern. Examples: 'CHAPTER I.', 'BOOK II', 'II.'",
                     lines=1,
                     visible=True,
                 )
@@ -276,10 +278,10 @@ def create_ingest_interface():
                 force_update_check = gr.Checkbox(
                     label="Force update if slug exists",
                     value=False,
-                    info="Overwrite existing book",
+                    info="Overwrite existing document",
                 )
 
-                ingest_btn = gr.Button("Ingest Book", variant="primary", size="lg")
+                ingest_btn = gr.Button("Ingest Document", variant="primary", size="lg")
 
             with gr.Column(scale=1):
                 gr.Markdown("### Current Library")
@@ -300,10 +302,10 @@ def create_ingest_interface():
                     max_height=800,
                 )
 
-                gr.Markdown("#### Delete Book")
+                gr.Markdown("#### Delete Document")
 
                 delete_slug_input = gr.Textbox(
-                    label="Book Slug to Delete",
+                    label="Document Slug to Delete",
                     placeholder="Enter slug (e.g., mma)",
                     lines=1,
                 )
@@ -454,7 +456,7 @@ def create_ingest_interface():
 
             if not slug:
                 return (
-                    "[ERROR] Please enter a book slug",
+                    "[ERROR] Please enter a document slug",
                     None,  # No pending slug
                     gr.update(visible=False),  # Hide confirm button
                 )
@@ -465,7 +467,7 @@ def create_ingest_interface():
 
             if not book_info:
                 return (
-                    f"[ERROR] Book '{slug}' not found",
+                    f"[ERROR] Document '{slug}' not found",
                     None,
                     gr.update(visible=False),
                 )
@@ -497,7 +499,7 @@ def create_ingest_interface():
                     gr.update(visible=False),
                 )
 
-            output = f"Deleting book '{pending_slug}'...\n\n"
+            output = f"Deleting document '{pending_slug}'...\n\n"
             success, message, chunks_deleted = delete_book(pending_slug)
 
             # Always refresh book list after deletion attempt

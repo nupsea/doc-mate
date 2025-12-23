@@ -170,6 +170,32 @@ class DocumentParser(ABC):
         """
         return []
 
+    def safe_read_text(self, file_path: Path = None) -> str:
+        """
+        Safely read text file with encoding detection.
+
+        Tries UTF-8 first, then falls back to other common encodings.
+
+        Args:
+            file_path: Path to read (defaults to self.file_path)
+
+        Returns:
+            Decoded text content
+        """
+        if file_path is None:
+            file_path = self.file_path
+
+        encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252', 'iso-8859-1']
+
+        for encoding in encodings:
+            try:
+                return file_path.read_text(encoding=encoding)
+            except (UnicodeDecodeError, LookupError):
+                continue
+
+        # If all encodings fail, read as binary and decode with errors='replace'
+        return file_path.read_bytes().decode('utf-8', errors='replace')
+
     @staticmethod
     def simple_hash(text: str, length: int = 7) -> str:
         """

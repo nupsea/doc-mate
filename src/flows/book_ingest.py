@@ -69,15 +69,25 @@ def read_and_parse(
 
     else:
         # For other types, use new parsers
+        print(f"[PARSE] Creating parser for {doc_type}...")
         parser = get_parser(file_path, doc_type, slug, split_pattern=split_pattern)
+        print(f"[PARSE] Parsing document structure...")
         parsed = parser.parse()
+        print(f"[PARSE] Parsed {len(parsed)} sections. Creating chunks...")
         # Different parsers have different chunking parameters
-        if doc_type == 'conversation':
-            chunks = parser.chunk(parsed, max_tokens=max_tokens, overlap_turns=2)
-        elif doc_type == 'script':
-            chunks = parser.chunk(parsed)  # Scripts use scene-based chunking
-        else:
-            chunks = parser.chunk(parsed, max_tokens=max_tokens, overlap=overlap)
+        try:
+            if doc_type == 'conversation':
+                chunks = parser.chunk(parsed, max_tokens=max_tokens, overlap_turns=2)
+            elif doc_type == 'script':
+                chunks = parser.chunk(parsed)  # Scripts use scene-based chunking
+            else:
+                chunks = parser.chunk(parsed, max_tokens=max_tokens, overlap=overlap)
+            print(f"[PARSE] Created {len(chunks)} chunks successfully")
+        except Exception as e:
+            print(f"[PARSE ERROR] Chunking failed: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
     return {
         "chunks": chunks,
@@ -87,9 +97,9 @@ def read_and_parse(
     }
 
 
-async def generate_summaries(chunks: list):
+async def generate_summaries(chunks: list, doc_type: str = 'book'):
     """Generate chapter and book summaries."""
-    gen = SummaryGenerator()
+    gen = SummaryGenerator(doc_type=doc_type)
     chapter_summaries, book_summary = await gen.summarize_hierarchy(chunks)
 
     return {
@@ -237,9 +247,9 @@ async def ingest_document(
             metadata = {}
 
     # Generate summaries (for all types)
-    summary_result = await generate_summaries(parse_result["chunks"])
+    summary_result = await generate_summaries(parse_result["chunks"], doc_type=doc_type)
     print(
-        f"Generated {summary_result['num_chapters']} chapter summaries + book summary"
+        f"Generated {summary_result['num_chapters']} section summaries + overall summary"
     )
 
     db_result = store_to_db(
