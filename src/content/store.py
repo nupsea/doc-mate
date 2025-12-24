@@ -1,4 +1,5 @@
 import os
+import json
 import psycopg2
 from psycopg2.extras import execute_values
 
@@ -86,20 +87,89 @@ class PgresStore:
     ) -> int:
         """
         Insert or update book metadata. Returns book_id.
+
+        DEPRECATED: Use store_document() instead for multi-format support.
+        Kept for backward compatibility.
         """
+        return self.store_document(
+            slug=slug,
+            title=title,
+            doc_type='book',
+            author=author,
+            num_chunks=num_chunks,
+            num_chars=num_chars
+        )
+
+    def _sanitize_metadata(self, metadata: dict) -> dict:
+        """Remove null bytes from metadata that PostgreSQL JSONB can't handle."""
+        if not metadata:
+            return {}
+
+        def clean_value(val):
+            if isinstance(val, str):
+                return val.replace('\x00', '')
+            elif isinstance(val, dict):
+                return {k: clean_value(v) for k, v in val.items()}
+            elif isinstance(val, list):
+                return [clean_value(item) for item in val]
+            return val
+
+        return clean_value(metadata)
+
+    def store_document(
+        self,
+        slug: str,
+        title: str,
+        doc_type: str = 'book',
+        author: str = None,
+        num_chunks: int = None,
+        num_chars: int = None,
+        metadata: dict = None,
+    ) -> int:
+        """
+        Store any document type (books, scripts, conversations, etc).
+
+        Args:
+            slug: Unique identifier for document
+            title: Document title
+            doc_type: 'book', 'script', 'conversation', 'tech_doc', 'report'
+            author: Document author (optional)
+            num_chunks: Number of chunks created
+            num_chars: Total character count
+            metadata: Type-specific metadata (stored as JSONB)
+
+        Returns:
+            book_id (document ID)
+
+        Examples:
+            # Store a book
+            store.store_document('my-book', 'My Book', 'book', author='John Doe')
+
+            # Store a script with metadata
+            store.store_document(
+                'matrix', 'The Matrix', 'script',
+                metadata={'num_scenes': 150, 'runtime_minutes': 136}
+            )
+        """
+        # Sanitize metadata to remove null bytes
+        clean_metadata = self._sanitize_metadata(metadata)
+
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO books (slug, title, author, num_chunks, num_chars)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO books (slug, title, author, num_chunks, num_chars, doc_type, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (slug) DO UPDATE
                 SET title = excluded.title,
                     author = excluded.author,
                     num_chunks = excluded.num_chunks,
-                    num_chars = excluded.num_chars
+                    num_chars = excluded.num_chars,
+                    doc_type = excluded.doc_type,
+                    metadata = excluded.metadata
                 RETURNING book_id
-            """,
-                (slug, title, author, num_chunks, num_chars),
+                """,
+                (slug, title, author, num_chunks, num_chars, doc_type,
+                 json.dumps(clean_metadata)),
             )
             book_id = cur.fetchone()[0]
         self.conn.commit()

@@ -19,6 +19,11 @@ logger = logging.getLogger(__name__)
 class BookToolHandlers:
     """Handles all book-related tool requests."""
 
+    @staticmethod
+    def _clean_book_identifier(identifier: str) -> str:
+        """Strip brackets from book identifier (e.g., '[dth]' -> 'dth')."""
+        return identifier.strip('[]')
+
     def handle_search_book(self, arguments: dict) -> list[TextContent]:
         """
         Handle single-book search requests.
@@ -31,7 +36,7 @@ class BookToolHandlers:
         """
         result = search_book_content(
             query=arguments["query"],
-            book_identifier=arguments["book_identifier"],
+            book_identifier=self._clean_book_identifier(arguments["book_identifier"]),
             limit=arguments.get("limit", 5),
         )
 
@@ -57,18 +62,32 @@ class BookToolHandlers:
             )
             for i, chunk in enumerate(result["chunks"], 1):
                 chunk_id = chunk.get("id", "unknown")
+                metadata = chunk.get("metadata", {})
 
-                # Extract chapter number from chunk_id (format: slug_chapter_chunk_hash)
-                chapter_num = "?"
+                # Extract section number from chunk_id (format: slug_section_chunk_hash)
+                section_num = "?"
                 if "_" in chunk_id:
                     parts = chunk_id.split("_")
                     if len(parts) >= 2:
-                        chapter_num = (
+                        section_num = (
                             parts[1].lstrip("0") or "0"
                         )  # Remove leading zeros
 
-                # Format citation
-                citation = f"[Chapter {chapter_num}, Source: {chunk_id}]"
+                # Format citation based on metadata
+                # For conversations, include speaker information
+                speakers = metadata.get("speakers", [])
+                if speakers:
+                    speakers_str = ", ".join(speakers)
+                    citation = f"[Speakers: {speakers_str}, Source: {chunk_id}]"
+                else:
+                    # Try to use section heading from metadata if available
+                    heading = metadata.get("heading", "")
+                    if heading and len(heading) < 50:  # Use heading if reasonable length
+                        citation = f"[{heading}, Source: {chunk_id}]"
+                    else:
+                        # Fall back to section number
+                        # Use generic "Section" instead of assuming "Chapter"
+                        citation = f"[Section {section_num}, Source: {chunk_id}]"
 
                 output += f"Passage {i} {citation}:\n{chunk['text']}\n\n---\n\n"
 
@@ -84,7 +103,7 @@ class BookToolHandlers:
         Returns:
             List of TextContent with book summary
         """
-        result = get_book_summary(arguments["book_identifier"])
+        result = get_book_summary(self._clean_book_identifier(arguments["book_identifier"]))
         return [
             TextContent(type="text", text=result["summary"] or "No summary available")
         ]
@@ -99,7 +118,7 @@ class BookToolHandlers:
         Returns:
             List of TextContent with all chapter summaries
         """
-        result = get_chapter_summaries(arguments["book_identifier"])
+        result = get_chapter_summaries(self._clean_book_identifier(arguments["book_identifier"]))
 
         output = f"Found {result['num_chapters']} chapters:\n\n"
         for ch in result["chapters"]:
@@ -109,13 +128,13 @@ class BookToolHandlers:
 
     def handle_search_multiple_books(self, arguments: dict) -> list[TextContent]:
         """
-        Handle multi-book comparative search requests.
+        Handle multi-document comparative search requests.
 
         Args:
             arguments: Dict with:
-                - 'query': Search query to use across all books
-                - 'book_identifiers': List of book titles to search
-                - 'limit_per_book': Optional, number of results per book (default: 3)
+                - 'query': Search query to use across all documents
+                - 'book_identifiers': List of document slugs to search
+                - 'limit_per_book': Optional, number of results per document (default: 3)
 
         Returns:
             List of TextContent with formatted comparative results
@@ -125,7 +144,7 @@ class BookToolHandlers:
         limit_per_book = arguments.get("limit_per_book", 3)
 
         logger.info(
-            f"Multi-book search: '{query}' across {len(book_identifiers)} books"
+            f"Multi-document search: '{query}' across {len(book_identifiers)} documents"
         )
 
         # Collect results from each book sequentially (thread-safe)
@@ -147,37 +166,50 @@ class BookToolHandlers:
             # Store result with book info for formatting
             all_results.append({"book": book_id, "result": result})
 
-        # Format combined output with clear book separation
+        # Format combined output with clear document separation
         if total_found == 0:
-            output = f"Found 0 results for '{query}' in any of the {len(book_identifiers)} books searched."
+            output = f"Found 0 results for '{query}' in any of the {len(book_identifiers)} documents searched."
         else:
-            output = f"Found {total_found} results - Comparative search for '{query}' across {len(book_identifiers)} books:\n\n"
+            output = f"Found {total_found} results - Comparative search for '{query}' across {len(book_identifiers)} documents:\n\n"
             output += "=" * 80 + "\n\n"
 
             for book_data in all_results:
                 book_id = book_data["book"]
                 result = book_data["result"]
 
-                # Book header
+                # Document header
                 output += f"### {book_id.upper()} ###\n\n"
 
                 if result.get("error"):
                     output += f"Error: {result['error']}\n\n"
                 elif result["num_results"] == 0:
-                    output += "No results found in this book.\n\n"
+                    output += "No results found in this document.\n\n"
                 else:
                     # Format passages for this book
                     for i, chunk in enumerate(result["chunks"], 1):
                         chunk_id = chunk.get("id", "unknown")
+                        metadata = chunk.get("metadata", {})
 
-                        # Extract chapter number
-                        chapter_num = "?"
+                        # Extract section number
+                        section_num = "?"
                         if "_" in chunk_id:
                             parts = chunk_id.split("_")
                             if len(parts) >= 2:
-                                chapter_num = parts[1].lstrip("0") or "0"
+                                section_num = parts[1].lstrip("0") or "0"
 
-                        citation = f"[Chapter {chapter_num}, Source: {chunk_id}]"
+                        # Format citation based on metadata
+                        # For conversations, include speaker information
+                        speakers = metadata.get("speakers", [])
+                        if speakers:
+                            speakers_str = ", ".join(speakers)
+                            citation = f"[Speakers: {speakers_str}, Source: {chunk_id}]"
+                        else:
+                            heading = metadata.get("heading", "")
+                            if heading and len(heading) < 50:
+                                citation = f"[{heading}, Source: {chunk_id}]"
+                            else:
+                                citation = f"[Section {section_num}, Source: {chunk_id}]"
+
                         output += f"Passage {i} {citation}:\n{chunk['text']}\n\n"
 
                 output += "-" * 80 + "\n\n"

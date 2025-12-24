@@ -1,10 +1,12 @@
 """
-Book ingestion interface component.
+Document ingestion interface component - supports books, scripts, conversations, tech docs, reports.
+
+Backward compatible with document ingestion.
 """
 
 import gradio as gr
 from pathlib import Path
-from src.flows.book_ingest import ingest_book
+from src.flows.book_ingest import ingest_document
 from src.ui.utils import (
     validate_slug,
     extract_chapter_info_from_chunks,
@@ -63,8 +65,9 @@ async def ingest_new_book(
     skip_chapters: bool,
     chapter_example: str,
     force_update: bool,
+    doc_type: str = 'book',
 ):
-    """Handle book ingestion from UI."""
+    """Handle document ingestion from UI (all types)."""
     if not file:
         return {
             "output": "Error: Please upload a file",
@@ -74,7 +77,7 @@ async def ingest_new_book(
 
     if not title.strip():
         return {
-            "output": "Error: Please provide a book title",
+            "output": "Error: Please provide a document title",
             "status": "[ERROR] Error",
             "clear_inputs": False,
         }
@@ -88,7 +91,8 @@ async def ingest_new_book(
             "clear_inputs": False,
         }
 
-    if not skip_chapters and not chapter_example.strip():
+    # Only validate chapter example for books
+    if doc_type == 'book' and not skip_chapters and not chapter_example.strip():
         return {
             "output": "Error: Please provide a chapter example or enable 'Skip chapter detection'",
             "status": "[ERROR] Error",
@@ -108,51 +112,57 @@ async def ingest_new_book(
     try:
         file_path = Path(file.name)
 
-        # Handle pattern building or skip
-        if skip_chapters:
-            pattern = None
-            output = "[SKIP] Chapter detection disabled - using automatic chunking\n\n"
+        # Handle pattern building (only for books)
+        if doc_type == 'book':
+            if skip_chapters:
+                pattern = None
+                output = "[SKIP] Chapter detection disabled - using automatic chunking\n\n"
+            else:
+                # Build pattern from example
+                pattern, desc = build_pattern_from_example(chapter_example)
+                output = f"Building pattern from example: '{chapter_example}'\n"
+                output += f"Generated pattern: {pattern}\n"
+                output += f"Description: {desc}\n\n"
+
+                if not pattern:
+                    return {
+                        "output": output + f"Error: {desc}",
+                        "status": "[ERROR] Pattern Error",
+                        "clear_inputs": False,
+                    }
+
+                # Validate pattern
+                success, message, matches = validate_pattern_on_file(
+                    pattern, str(file_path)
+                )
+                output += f"Pattern validation: {message}\n\n"
+
+                if not success:
+                    return {
+                        "output": output
+                        + "Pattern validation failed. Please try a different example.",
+                        "status": "[ERROR] Validation Failed",
+                        "clear_inputs": False,
+                    }
         else:
-            # Build pattern from example
-            pattern, desc = build_pattern_from_example(chapter_example)
-            output = f"Building pattern from example: '{chapter_example}'\n"
-            output += f"Generated pattern: {pattern}\n"
-            output += f"Description: {desc}\n\n"
-
-            if not pattern:
-                return {
-                    "output": output + f"Error: {desc}",
-                    "status": "[ERROR] Pattern Error",
-                    "clear_inputs": False,
-                }
-
-            # Validate pattern
-            success, message, matches = validate_pattern_on_file(
-                pattern, str(file_path)
-            )
-            output += f"Pattern validation: {message}\n\n"
-
-            if not success:
-                return {
-                    "output": output
-                    + "Pattern validation failed. Please try a different example.",
-                    "status": "[ERROR] Validation Failed",
-                    "clear_inputs": False,
-                }
+            # For non-book types, no pattern needed (parsers handle structure internally)
+            pattern = None
+            output = f"[INFO] Document type: {doc_type} - using built-in parser\n\n"
 
         output += "[RUNNING] Starting ingestion...\n"
 
-        # Run ingestion
-        result = await ingest_book(
+        # Run ingestion (use ingest_document for all types)
+        result = await ingest_document(
             slug=slug,
             file_path=str(file_path),
             title=title,
+            doc_type=doc_type,
             author=author or None,
             split_pattern=pattern,
             force_update=force_update,
         )
 
-        output += "\n[SUCCESS] Book ingested:\n"
+        output += f"\n[SUCCESS] {doc_type.title()} ingested:\n"
         output += f"- Slug: {result['slug']}\n"
         output += f"- Title: {result['title']}\n"
         output += f"- Chapters: {result['chapters']}\n"
@@ -190,6 +200,8 @@ async def ingest_new_book(
         }
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()  # This will print full traceback to docker logs
         return {
             "output": f"[ERROR] Error during ingestion: {str(e)}",
             "status": "[ERROR] Ingestion Failed",
@@ -198,20 +210,28 @@ async def ingest_new_book(
 
 
 def create_ingest_interface():
-    """Create the book ingestion tab interface."""
+    """Create the document ingestion tab interface."""
     from datetime import datetime
 
     with gr.Column():
-        gr.Markdown("### Upload and Index a New Book")
+        gr.Markdown("### Upload and Index a New Document")
 
         with gr.Row():
             with gr.Column(scale=2):
+                # Document type selector
+                doc_type_selector = gr.Dropdown(
+                    choices=["book", "script", "conversation", "tech_doc", "report"],
+                    value="book",
+                    label="Document Type",
+                    info="Select the type of document you're uploading"
+                )
+
                 file_upload = gr.File(
-                    label="Upload Book File (.txt or .pdf)", file_types=[".txt", ".pdf"]
+                    label="Upload Document File (.txt or .pdf)", file_types=[".txt", ".pdf"]
                 )
 
                 title_input = gr.Textbox(
-                    label="Book Title", placeholder="The Meditations", info="Required"
+                    label="Document Title", placeholder="The Meditations", info="Required"
                 )
 
                 author_input = gr.Textbox(
@@ -219,7 +239,7 @@ def create_ingest_interface():
                 )
 
                 slug_input = gr.Textbox(
-                    label="Book Slug (unique identifier)",
+                    label="Document Slug (unique identifier)",
                     placeholder="mma",
                     info="2-20 chars, lowercase, letters/numbers/-/_ only",
                     max_lines=1,
@@ -228,13 +248,13 @@ def create_ingest_interface():
                 skip_chapters_check = gr.Checkbox(
                     label="Skip chapter detection (use auto-chunking)",
                     value=False,
-                    info="Enable if book has no clear chapters or complex structure",
+                    info="Enable if document has no clear chapters or complex structure",
                 )
 
                 chapter_example_input = gr.Textbox(
                     label="Chapter Pattern Example",
                     placeholder="e.g., CHAPTER I. or II. or BOOK II",
-                    info="Enter any chapter heading from your book, then test pattern. Examples: 'CHAPTER I.', 'BOOK II', 'II.'",
+                    info="Enter any chapter heading from your document, then test pattern. Examples: 'CHAPTER I.', 'BOOK II', 'II.'",
                     lines=1,
                     visible=True,
                 )
@@ -258,10 +278,10 @@ def create_ingest_interface():
                 force_update_check = gr.Checkbox(
                     label="Force update if slug exists",
                     value=False,
-                    info="Overwrite existing book",
+                    info="Overwrite existing document",
                 )
 
-                ingest_btn = gr.Button("Ingest Book", variant="primary", size="lg")
+                ingest_btn = gr.Button("Ingest Document", variant="primary", size="lg")
 
             with gr.Column(scale=1):
                 gr.Markdown("### Current Library")
@@ -282,10 +302,10 @@ def create_ingest_interface():
                     max_height=800,
                 )
 
-                gr.Markdown("#### Delete Book")
+                gr.Markdown("#### Delete Document")
 
                 delete_slug_input = gr.Textbox(
-                    label="Book Slug to Delete",
+                    label="Document Slug to Delete",
                     placeholder="Enter slug (e.g., mma)",
                     lines=1,
                 )
@@ -311,24 +331,43 @@ def create_ingest_interface():
 
         # Event handlers
 
-        # Toggle chapter pattern fields visibility based on skip_chapters checkbox
-        def toggle_chapter_fields(skip_chapters):
-            visible = not skip_chapters
+        # Toggle chapter pattern fields visibility based on doc_type and skip_chapters
+        def toggle_chapter_fields(doc_type, skip_chapters):
+            # Only show chapter fields for books (and only if skip_chapters is False)
+            is_book = doc_type == 'book'
+            visible = is_book and not skip_chapters
+
             return (
                 gr.update(visible=visible),  # chapter_example_input
                 gr.update(visible=visible),  # test_pattern_btn
                 gr.update(visible=visible),  # pattern_test_output
                 gr.update(visible=visible),  # nested_structure_note
+                gr.update(visible=is_book),  # skip_chapters_check (only for books)
             )
 
-        skip_chapters_check.change(
+        # Update visibility when document type changes
+        doc_type_selector.change(
             toggle_chapter_fields,
-            [skip_chapters_check],
+            [doc_type_selector, skip_chapters_check],
             [
                 chapter_example_input,
                 test_pattern_btn,
                 pattern_test_output,
                 nested_structure_note,
+                skip_chapters_check,
+            ],
+        )
+
+        # Update visibility when skip_chapters checkbox changes
+        skip_chapters_check.change(
+            toggle_chapter_fields,
+            [doc_type_selector, skip_chapters_check],
+            [
+                chapter_example_input,
+                test_pattern_btn,
+                pattern_test_output,
+                nested_structure_note,
+                skip_chapters_check,
             ],
         )
 
@@ -339,10 +378,10 @@ def create_ingest_interface():
         )
 
         async def handle_ingest(
-            file, title, author, slug, skip_chap, chapter_ex, force
+            doc_type, file, title, author, slug, skip_chap, chapter_ex, force
         ):
             result = await ingest_new_book(
-                file, title, author, slug, skip_chap, chapter_ex, force
+                file, title, author, slug, skip_chap, chapter_ex, force, doc_type
             )
 
             # Refresh library list with timestamp
@@ -384,6 +423,7 @@ def create_ingest_interface():
         ingest_btn.click(
             handle_ingest,
             [
+                doc_type_selector,
                 file_upload,
                 title_input,
                 author_input,
@@ -416,7 +456,7 @@ def create_ingest_interface():
 
             if not slug:
                 return (
-                    "[ERROR] Please enter a book slug",
+                    "[ERROR] Please enter a document slug",
                     None,  # No pending slug
                     gr.update(visible=False),  # Hide confirm button
                 )
@@ -427,7 +467,7 @@ def create_ingest_interface():
 
             if not book_info:
                 return (
-                    f"[ERROR] Book '{slug}' not found",
+                    f"[ERROR] Document '{slug}' not found",
                     None,
                     gr.update(visible=False),
                 )
@@ -459,7 +499,7 @@ def create_ingest_interface():
                     gr.update(visible=False),
                 )
 
-            output = f"Deleting book '{pending_slug}'...\n\n"
+            output = f"Deleting document '{pending_slug}'...\n\n"
             success, message, chunks_deleted = delete_book(pending_slug)
 
             # Always refresh book list after deletion attempt

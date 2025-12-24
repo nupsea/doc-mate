@@ -1,5 +1,5 @@
 """
-Main Gradio application for Book Mate.
+Main Gradio application for Doc Mate.
 """
 
 import gradio as gr
@@ -103,7 +103,7 @@ class BookMateUI:
                         )
                         # Only inject if not already mentioned
                         if book_title.lower() not in message.lower():
-                            message = f"{message} (for the book '{book_title}')"
+                            message = f"{message} (for the document '{book_title}')"
                             print(f"[UI] Injected title into message: {message}")
                         else:
                             print("[UI] Title already in message, not injecting")
@@ -141,16 +141,16 @@ def create_app():
 
     ui = BookMateUI()
 
-    with gr.Blocks(title="Book Mate", theme=gr.themes.Base()) as app:
-        gr.Markdown("# Book Mate - AI Book Assistant")
+    with gr.Blocks(title="Doc Mate", theme=gr.themes.Base()) as app:
+        gr.Markdown("# Doc Mate - AI Document Assistant")
 
         with gr.Tabs() as tabs:
             # Tab 1: Chat Interface
             with gr.Tab("Chat", id=0):
                 dropdown, book_list, load_book_list = create_chat_interface(ui)
 
-            # Tab 2: Add New Book
-            with gr.Tab("Add Book", id=1):
+            # Tab 2: Add New Document
+            with gr.Tab("Add Document", id=1):
                 ingest_book_list = create_ingest_interface()
 
             # Tab 3: Monitoring
@@ -163,7 +163,7 @@ def create_app():
             books = get_available_books()
             new_list = format_book_list(books)
             # Show only titles in dropdown, not slugs
-            new_choices = [("Select a book...", "none")] + [
+            new_choices = [("Select a doc...", "none")] + [
                 (f"{title}", slug) for slug, title, _, _, _ in books
             ]
 
