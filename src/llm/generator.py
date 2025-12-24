@@ -234,11 +234,11 @@ Combine them into 2-3 cohesive paragraphs that capture the document's key themes
         tasks = [self.summarize_chapter(text, sid) for sid, text in chapters.items()]
         chapter_summaries = await asyncio.gather(*tasks)
 
-        print(f"[SUMMARY] Section summaries complete. Generating final summary...")
+        print("[SUMMARY] Section summaries complete. Generating final summary...")
 
         # Summarize entire book
         book_summary = await self.summarize_book(chapter_summaries)
 
-        print(f"[SUMMARY] Final summary complete!")
+        print("[SUMMARY] Final summary complete!")
 
         return chapter_summaries, book_summary

@@ -10,8 +10,7 @@ Supports formats:
 
 import re
 import tiktoken
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 
 try:
     import fitz  # PyMuPDF
@@ -282,7 +281,7 @@ class ConversationParser(DocumentParser):
                 start_seconds = self._parse_timestamp(timestamps[0])
                 end_seconds = self._parse_timestamp(timestamps[-1])
                 duration_seconds = end_seconds - start_seconds
-            except:
+            except (ValueError, IndexError, AttributeError):
                 pass
 
         return {

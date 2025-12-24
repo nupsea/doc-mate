@@ -71,7 +71,7 @@ def read_and_parse(
         # For other types, use new parsers
         print(f"[PARSE] Creating parser for {doc_type}...")
         parser = get_parser(file_path, doc_type, slug, split_pattern=split_pattern)
-        print(f"[PARSE] Parsing document structure...")
+        print("[PARSE] Parsing document structure...")
         parsed = parser.parse()
         print(f"[PARSE] Parsed {len(parsed)} sections. Creating chunks...")
         # Different parsers have different chunking parameters
@@ -243,7 +243,7 @@ async def ingest_document(
         try:
             parser = get_parser(file_path, doc_type, slug, split_pattern=split_pattern)
             metadata = parser.extract_metadata()
-        except:
+        except Exception:
             metadata = {}
 
     # Generate summaries (for all types)

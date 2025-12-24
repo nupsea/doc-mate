@@ -6,7 +6,7 @@ Backward compatible with document ingestion.
 
 import gradio as gr
 from pathlib import Path
-from src.flows.book_ingest import ingest_book, ingest_document
+from src.flows.book_ingest import ingest_document
 from src.ui.utils import (
     validate_slug,
     extract_chapter_info_from_chunks,
