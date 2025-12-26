@@ -15,11 +15,14 @@ A universal document assistant powered by LLMs that lets you upload and chat wit
 - **AI Chat Interface**: Ask questions with context-aware responses and citations
 - **Multi-Document Search**: Compare themes across multiple documents simultaneously
 
-### Model Flexibility (Phase 2)
-- **OpenAI**: GPT-4o, GPT-4o-mini
-- **Anthropic**: Claude 3.5 Sonnet, Claude 3.5 Haiku
-- **Local Models**: Llama, Mistral, Phi via Ollama/LM Studio
-- **Privacy Mode**: Complete offline operation for sensitive documents
+### Model Flexibility
+- **OpenAI**: GPT-4o, GPT-4o-mini, GPT-4 Turbo, GPT-3.5 Turbo
+- **Local Models**: Llama 3.1 8B via Ollama
+- **Privacy Modes**: 4 flexible privacy levels (Normal, Ephemeral, Internal, Private)
+  - **Normal**: Full observability with any model
+  - **Ephemeral**: No tracking, still uses cloud APIs
+  - **Internal**: Local LLM only, metrics collected
+  - **Private**: No tracking + local LLM only (maximum privacy)
 
 ### Advanced Features
 - **Automatic Query Retry**: Rephrases and retries when no results found
@@ -39,8 +42,8 @@ See [DEVELOPMENT_PHASES.md](DEVELOPMENT_PHASES.md) for complete roadmap.
 ### Prerequisites
 - Docker & Docker Compose
 - Python 3.12+
-- OpenAI API Key (or Anthropic for Claude)
-- Optional: Ollama for local models
+- OpenAI API Key (for cloud models)
+- **Optional**: Ollama for local LLM support (privacy modes)
 
 ### Installation
 
@@ -60,23 +63,66 @@ cp .env_template .env
 Update `.env` with your API keys:
 
 ```bash
-# Required
+# Required for cloud models
 OPENAI_API_KEY=sk-...
 
-# Optional (for multi-model support)
-ANTHROPIC_API_KEY=sk-ant-...
-
-# Optional (for local/private mode)
-LOCAL_MODEL=llama3.2:3b
-PRIVACY_MODE=false
+# Optional - Local LLM settings
+LLM_PROVIDER=openai              # or 'local' for Ollama
+LOCAL_MODEL=llama3.1:8b          # Ollama model name
+OLLAMA_BASE_URL=http://ollama:11434  # Ollama endpoint (Docker service)
 ```
 
-Build and start services:
+### Option 1: OpenAI Only (Quick Start)
 
 ```bash
 make build
 make start
 ```
+
+### Option 2: With Local LLM (Ollama in Docker - Recommended)
+
+**Start all services including Ollama:**
+
+```bash
+docker-compose -f docker-compose.ollama.yml up -d
+```
+
+**Pull model (first time only):**
+
+```bash
+docker exec -it doc-mate-ollama ollama pull llama3.1:8b
+```
+
+**Verify:**
+
+```bash
+docker exec -it doc-mate-ollama ollama list
+```
+
+### Option 3: Ollama Installed Separately (Alternative)
+
+If running Ollama outside Docker:
+
+```bash
+# Install on host
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.1:8b
+ollama serve
+```
+
+Update `.env`:
+```bash
+OLLAMA_BASE_URL=http://host.docker.internal:11434  # macOS/Windows
+# OR
+OLLAMA_BASE_URL=http://172.17.0.1:11434            # Linux
+```
+
+Then start:
+```bash
+make start
+```
+
+---
 
 The UI will be available at http://localhost:7860
 Phoenix tracing UI will be available at http://localhost:6006
@@ -116,15 +162,21 @@ Go to the "Add Document" tab:
 
 Go to the "Chat" tab:
 
-1. Select document(s) from dropdown (optional - leave empty for multi-doc queries)
-2. Choose LLM provider (Auto, OpenAI, Anthropic, Local)
-3. Toggle Privacy Mode for local-only processing
-4. Ask questions:
+1. **Select Document** (optional - leave empty for multi-doc queries)
+2. **Choose Provider**: OpenAI or Local Ollama
+3. **Select Model**:
+   - OpenAI: GPT-4o Mini (recommended), GPT-4o, GPT-4 Turbo
+   - Local: Llama 3.1 8B
+4. **Choose Privacy Mode**:
+   - **Normal**: Full metrics/tracing, any model (default)
+   - **Ephemeral**: No tracking, still uses OpenAI
+   - **Internal**: Local LLM only, metrics collected
+   - **Private**: No tracking + local LLM only (maximum privacy)
+5. Ask questions:
    - "What is this document about?"
    - "Find examples of authentication code"
-   - "Which characters appear in Act 2?"
-   - "Compare leadership styles in these documents"
-5. Rate responses to help improve the system
+   - "Compare Marcus Aurelius and Homer on persistence"
+6. Rate responses (in Normal mode)
 
 **Query Examples by Document Type:**
 
@@ -255,56 +307,71 @@ Doc-Mate is under active development. See [DEVELOPMENT_PHASES.md](DEVELOPMENT_PH
 
 **Timeline**: ~12 weeks to full feature set
 
-## Privacy Mode
+## Privacy Modes
 
-Doc-Mate supports complete offline operation for sensitive documents:
+Doc-Mate offers 4 flexible privacy levels:
 
-### Setup Local Models
+### Mode Comparison
 
-```bash
-# Install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
+| Mode | Tracking | LLM Options | Use Case |
+|------|----------|-------------|----------|
+| **Normal** | Full metrics | OpenAI or Local | General usage, observability |
+| **Ephemeral** | No tracking | OpenAI or Local | Sensitive queries, powerful models |
+| **Internal** | Metrics saved | Local only | Air-gapped, compliance |
+| **Private** | No tracking | Local only | Maximum privacy |
 
-# Pull models
-ollama pull llama3.2:3b        # Fast text generation
-ollama pull llava:7b           # Image understanding
-ollama pull nomic-embed-text   # Embeddings
+### How to Use
+
+**In UI:**
+- Select Privacy Mode dropdown in Chat tab
+- Choose from: Normal, Ephemeral, Internal, Private
+- Provider/Model update automatically based on mode
+
+**Programmatically:**
+
+```python
+from src.mcp_client.agent import BookMateAgent
+
+# Ephemeral: No tracking, can use OpenAI
+agent = BookMateAgent(provider="openai", ephemeral=True)
+
+# Internal: Local LLM only, metrics saved
+agent = BookMateAgent(internal_mode=True)
+
+# Private: Maximum privacy (ephemeral + internal)
+agent = BookMateAgent(ephemeral=True, internal_mode=True)
 ```
 
-### Enable Privacy Mode
+### What Gets Tracked
 
-```bash
-# .env
-PRIVACY_MODE=true
-LOCAL_MODEL=llama3.2:3b
-```
+**Normal & Internal:**
+- Query/response text
+- Tool calls, latency
+- LLM assessments
+- Phoenix traces
 
-When enabled:
-- All queries processed locally (no cloud APIs)
-- Embeddings generated locally
-- Image captions via local BLIP-2
-- Zero data leaves your machine
+**Ephemeral & Private:**
+- Nothing saved
+- No database writes
+- No Phoenix traces
+- Memory only
 
-**Trade-offs:**
-- Slower than cloud APIs
-- Requires GPU for best performance
-- Lower quality for complex reasoning
+See [docs/PRIVACY_MODES.md](docs/PRIVACY_MODES.md) for details.
 
-## Multi-Model Support
+## Model Selection
 
-Choose the best model for your needs:
+| Provider | Model | Best For | Cost | Speed |
+|----------|-------|----------|------|-------|
+| **OpenAI** | GPT-4o Mini | General queries | $0.15/M tokens | Fast (1-3s) |
+| **OpenAI** | GPT-4o | Complex analysis | $2.50/M tokens | Fast (2-4s) |
+| **OpenAI** | GPT-4 Turbo | Advanced reasoning | $5/M tokens | Fast (2-5s) |
+| **Local** | Llama 3.1 8B | Privacy, offline | Free | Slow (5-15s) |
 
-| Provider | Models | Best For | Cost |
-|----------|--------|----------|------|
-| **OpenAI** | GPT-4o, GPT-4o-mini | General purpose, code | $0.15-5/M tokens |
-| **Anthropic** | Claude 3.5 Sonnet/Haiku | Complex reasoning, analysis | $0.80-3/M tokens |
-| **Local** | Llama 3.2, Mistral | Privacy, cost savings | Free |
-
-**Auto-routing**: Doc-Mate automatically selects the best model based on:
-- Query complexity (simple → local, complex → Claude)
-- Privacy mode settings
-- Cost preferences
-- Document type (code → GPT-4, analysis → Claude)
+**Recommendations:**
+- **Default**: GPT-4o Mini (best speed/cost/quality balance)
+- **Complex queries**: GPT-4o (comparative analysis, nuanced reasoning)
+- **Privacy**: Llama 3.1 8B (offline, no external calls)
+- **Air-gapped**: Llama 3.1 8B (compliance requirements)
 
 ## Database Management
 

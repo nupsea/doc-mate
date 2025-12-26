@@ -76,10 +76,17 @@ class FusionRetriever:
                 logger.warning("BM25 index not found, using vector-only search")
                 use_bm25 = False
 
+        logger.info("Hybrid search: mode=%s, topk=%d, book_slug=%s",
+                   "BM25+Vector" if use_bm25 else "Vector-only", topk, book_slug)
+
         embed_results = self.vec.search(query, topk * 2, book_slug=book_slug)
 
         if not use_bm25:
+            logger.info("Vector-only search completed: %d results", len(embed_results[:topk]))
             return [c["id"] for c in embed_results[:topk]]
 
         bm25_results = self.bm25.search(query, topk * 2, book_slug=book_slug)
-        return self.weighted_fusion(bm25_results, embed_results, topk)
+        fused = self.weighted_fusion(bm25_results, embed_results, topk)
+        logger.info("Hybrid fusion completed: %d BM25 + %d Vector -> %d fused results",
+                   len(bm25_results), len(embed_results), len(fused))
+        return fused
