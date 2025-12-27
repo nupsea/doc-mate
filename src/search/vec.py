@@ -72,6 +72,7 @@ class SemanticRetriever:
             )
             return []
 
+        logger.info("Qdrant search: query='%s', topk=%d, book_slug=%s", query, topk, book_slug)
         vec = self.embedder.encode([query], normalize_embeddings=True)[0].tolist()
 
         # Build query filter if book_slug is provided
@@ -93,10 +94,13 @@ class SemanticRetriever:
             limit=topk,
             query_filter=query_filter
         ).points
-        return [
+
+        results = [
             {"id": h.payload["id"], "text": h.payload["text"], "score": h.score}
             for h in hits
         ]
+        logger.info("Qdrant returned %d results", len(results))
+        return results
 
     def id_search(self, query: str, topk=7):
         search_results = self.search(query, topk)

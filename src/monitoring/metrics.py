@@ -370,6 +370,54 @@ class MetricsCollector:
 metrics_collector = MetricsCollector()
 
 
+class NoOpQueryTimer:
+    """
+    No-op timer for ephemeral mode - doesn't collect or save metrics.
+    Provides same interface as QueryTimer but does nothing.
+    """
+
+    def __init__(self, query: str, book_slug: Optional[str] = None):
+        self.query = query
+        self.book_slug = book_slug
+        self.query_id = f"ephemeral_{int(time.time() * 1000)}_{id(self)}"
+        self.tool_calls = []
+        self.num_results = None
+        self.success = True
+        self.error_message = None
+        self.response = ""
+        self.llm_relevance_score = LLMRelevanceScore.NOT_JUDGED
+        self.llm_reasoning = None
+        self.retry_attempted = False
+        self.original_query = None
+        self.rephrased_query = None
+        self.retry_results = None
+        self.fallback_to_context = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    def add_tool_call(self, tool_name: str):
+        pass
+
+    def set_num_results(self, num: int):
+        pass
+
+    def set_response(self, response: str):
+        pass
+
+    def set_llm_assessment(self, score: LLMRelevanceScore, reasoning: str):
+        pass
+
+    def set_retry_info(self, original: str, rephrased: str, results: int):
+        pass
+
+    def set_fallback_to_context(self):
+        pass
+
+
 class QueryTimer:
     """Context manager for timing queries."""
 

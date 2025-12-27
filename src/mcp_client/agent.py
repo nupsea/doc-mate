@@ -1,13 +1,16 @@
 """
-MCP Client using OpenAI for function calling.
+MCP Client using LLM providers (OpenAI, Local/Ollama) for function calling.
 """
 
 import asyncio
+import ast
 import json
+from typing import Optional
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from openai import OpenAI
-from src.monitoring.metrics import QueryTimer
+from src.llm.providers import ModelRouter
+from src.llm.config import LLMConfig
+from src.monitoring.metrics import QueryTimer, NoOpQueryTimer, LLMRelevanceScore
 from src.monitoring.judge import ResponseJudge
 from src.monitoring.tracer import init_phoenix_tracing
 from src.mcp_client.prompts import (
@@ -21,15 +24,97 @@ init_phoenix_tracing()
 
 
 class BookMateAgent:
-    def __init__(self, openai_api_key: str, model: str = "gpt-4o-mini"):
-        self.client = OpenAI(api_key=openai_api_key)
-        self.model = model
+    def __init__(
+        self,
+        provider: Optional[str] = None,
+        openai_api_key: str = None,
+        model: str = None,
+        ephemeral: bool = False,
+        internal_mode: bool = False
+    ):
+        """
+        Initialize BookMate agent with LLM provider abstraction.
+
+        Args:
+            provider: LLM provider to use (openai, local, or None for default from config)
+            openai_api_key: (DEPRECATED) OpenAI API key for backward compatibility
+            model: (DEPRECATED) Model name for backward compatibility
+            ephemeral: If True, disable metrics/tracing (conversation only in memory, can still use OpenAI)
+            internal_mode: If True, force local LLM only (no external API calls)
+        """
+        # Internal mode forces local provider
+        if internal_mode:
+            provider = "local"
+            print("[INFO] Internal mode enabled - forcing local LLM (no external API calls)")
+
+        # Initialize LLM provider via ModelRouter
+        self.router = ModelRouter()
+        self.llm_provider = self.router.get_provider(provider)
+
+        # Backward compatibility: set model if provided
+        if model:
+            self.llm_provider.model = model
+
+        # Load config to check if judge should be enabled
+        self.config = LLMConfig.from_env()
+
+        # Privacy mode flags
+        self.ephemeral = ephemeral
+        self.internal_mode = internal_mode
+
+        if self.ephemeral and self.internal_mode:
+            print("[INFO] Private mode (ephemeral + internal) - no metrics/tracing, local LLM only")
+        elif self.ephemeral:
+            print("[INFO] Ephemeral mode - no metrics/tracing saved, conversation in memory only")
+        elif self.internal_mode:
+            print("[INFO] Internal mode - local LLM only, metrics still collected")
+
         self.session: ClientSession | None = None
         self.stdio_context = None
         self.tools_cache = []
         self.read_stream = None
         self.write_stream = None
-        self.judge = ResponseJudge(self.client)
+
+        # Initialize judge only if enabled (auto-disabled for local LLM or ephemeral mode)
+        if self.config.enable_judge and not self.ephemeral:
+            self.judge = ResponseJudge(llm_provider=self.llm_provider)
+            print(f"[INFO] Response quality judge enabled using {self.llm_provider.provider_name} provider")
+        else:
+            self.judge = None
+            if self.ephemeral:
+                print("[INFO] Response quality judge disabled (ephemeral mode)")
+            else:
+                print("[INFO] Response quality judge disabled (improves local LLM performance)")
+
+    def _get_max_tokens_for_provider(self) -> int:
+        """
+        Get appropriate max_tokens based on provider for optimal performance.
+
+        Returns:
+            max_tokens value (smaller for local LLM for faster responses)
+        """
+        if self.llm_provider.provider_name == "local":
+            # Balanced token limit for local LLM
+            # 1536 is good for llama3.1:8b (better than 3b, can handle more)
+            return 1536
+        else:
+            # OpenAI and other cloud providers can handle more tokens efficiently
+            return 4096
+
+    def _get_temperature_for_provider(self) -> float:
+        """
+        Get optimal temperature for function calling based on provider.
+
+        Returns:
+            temperature value (0 for local LLM = more deterministic function calls)
+        """
+        if self.llm_provider.provider_name == "local":
+            # Temperature 0 = more deterministic, better for function calling
+            # Small models need maximum predictability
+            return 0.0
+        else:
+            # OpenAI models can handle slight randomness
+            return 0.1
 
     async def connect_to_mcp_server(self):
         """Connect to the MCP server."""
@@ -97,39 +182,44 @@ class BookMateAgent:
             print(f"[ERROR] {error_msg}")
             return error_msg
 
-    def _get_available_books(self) -> tuple[str, dict]:
+    def _get_available_books(self) -> tuple[str, dict, set]:
         """
         Get available documents from database.
 
         Returns:
-            (formatted_list, title_to_slug_map)
+            (formatted_list, title_to_slug_map, doc_types)
         """
         try:
             from src.content.store import PgresStore
 
             store = PgresStore()
             with store.conn.cursor() as cur:
-                cur.execute("SELECT slug, title, author FROM books ORDER BY title")
+                cur.execute("SELECT slug, title, author, doc_type FROM books ORDER BY title")
                 books = cur.fetchall()
 
             if not books:
-                return "No documents currently available in the library.", {}
+                return "No documents currently available in the library.", {}, {"book"}
 
             # Create list with slugs (needed for tool calls)
             book_list = "\n".join(
                 [
                     f"- [{slug}] {title}" + (f" by {author}" if author else "")
-                    for slug, title, author in books
+                    for slug, title, author, _ in books
                 ]
             )
 
             # Create mapping for internal use
-            title_to_slug = {title.lower(): slug for slug, title, _ in books}
+            title_to_slug = {title.lower(): slug for slug, title, _, _ in books}
 
-            return f"Available documents (use slug in square brackets for tool calls):\n{book_list}", title_to_slug
+            # Collect unique doc types
+            doc_types = {doc_type for _, _, _, doc_type in books if doc_type}
+            if not doc_types:
+                doc_types = {"book"}  # Default if no doc_type set
+
+            return f"Available documents (use slug in square brackets for tool calls):\n{book_list}", title_to_slug, doc_types
         except Exception as e:
             print(f"[WARN] Could not load document list: {e}")
-            return "Document list unavailable.", {}
+            return "Document list unavailable.", {}, {"book"}
 
     async def _handle_tool_calls(
         self,
@@ -150,11 +240,11 @@ class BookMateAgent:
                 "content": assistant_message.content,
                 "tool_calls": [
                     {
-                        "id": tc.id,
+                        "id": tc["id"],
                         "type": "function",
                         "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
+                            "name": tc["function"]["name"],
+                            "arguments": tc["function"]["arguments"],
                         },
                     }
                     for tc in assistant_message.tool_calls
@@ -164,16 +254,29 @@ class BookMateAgent:
 
         # Execute each tool call via MCP
         for tool_call in assistant_message.tool_calls:
-            function_name = tool_call.function.name
+            function_name = tool_call["function"]["name"]
 
             # Track tool call
             timer.add_tool_call(function_name)
 
             try:
-                function_args = json.loads(tool_call.function.arguments)
+                function_args = json.loads(tool_call["function"]["arguments"])
             except json.JSONDecodeError as e:
                 print(f"[ERROR] Invalid JSON in tool arguments: {e}")
                 function_args = {}
+
+            # Normalize numeric parameters (LLM sometimes returns strings)
+            if "limit_per_book" in function_args and isinstance(function_args["limit_per_book"], str):
+                try:
+                    function_args["limit_per_book"] = int(function_args["limit_per_book"])
+                except ValueError:
+                    pass  # Keep as string if can't convert
+
+            if "topk" in function_args and isinstance(function_args["topk"], str):
+                try:
+                    function_args["topk"] = int(function_args["topk"])
+                except ValueError:
+                    pass
 
             # Translate book title to slug if needed
             function_args, _ = self._translate_book_identifier(function_args)
@@ -240,7 +343,7 @@ class BookMateAgent:
             conversation_history.append(
                 {
                     "role": "tool",
-                    "tool_call_id": tool_call.id,
+                    "tool_call_id": tool_call["id"],
                     "content": tool_content,
                 }
             )
@@ -263,6 +366,17 @@ class BookMateAgent:
         # Handle single book identifier
         if "book_identifier" in function_args:
             book_id = function_args["book_identifier"]
+
+            # Normalize: LLM sometimes returns list instead of string
+            if isinstance(book_id, list):
+                if len(book_id) > 0:
+                    book_id = book_id[0]
+                    function_args["book_identifier"] = book_id
+                    print(f"[TOOL] Normalized list to string: {book_id}")
+                else:
+                    print("[ERROR] Empty list provided for book_identifier")
+                    return function_args, book_title_for_retry
+
             print(f"[TOOL] LLM provided book_identifier: '{book_id}'")
             print(
                 f"[TOOL] Available mappings: {self.title_to_slug if hasattr(self, 'title_to_slug') else 'NONE'}"
@@ -287,6 +401,24 @@ class BookMateAgent:
         # Handle multiple book identifiers (for comparative search)
         if "book_identifiers" in function_args:
             book_ids = function_args["book_identifiers"]
+
+            # Normalize: LLM sometimes returns string representation instead of list
+            if isinstance(book_ids, str):
+                try:
+                    # Try JSON parse first
+                    book_ids = json.loads(book_ids)
+                    print(f"[TOOL] Normalized JSON string to list: {book_ids}")
+                except (json.JSONDecodeError, ValueError):
+                    try:
+                        # Try Python literal eval (safer than eval)
+                        book_ids = ast.literal_eval(book_ids)
+                        print(f"[TOOL] Normalized Python literal to list: {book_ids}")
+                    except (ValueError, SyntaxError):
+                        print(f"[ERROR] Could not parse book_identifiers: {book_ids}")
+                        return function_args, book_title_for_retry
+
+                function_args["book_identifiers"] = book_ids
+
             print(f"[TOOL] LLM provided book_identifiers: {book_ids}")
 
             translated_ids = []
@@ -322,8 +454,15 @@ class BookMateAgent:
         """
         conversation_history.append({"role": "assistant", "content": response_text})
         timer.set_response(response_text)
-        score, reasoning = self.judge.assess_response(user_message, response_text)
-        timer.set_llm_assessment(score, reasoning)
+
+        # Run judge assessment only if enabled
+        if self.judge:
+            score, reasoning = self.judge.assess_response(user_message, response_text)
+            timer.set_llm_assessment(score, reasoning)
+        else:
+            # Skip judge for performance (local LLM)
+            timer.set_llm_assessment(LLMRelevanceScore.NOT_JUDGED, "Judge disabled for performance")
+
         return response_text, conversation_history, timer.query_id
 
     def _prepare_conversation(self, user_message: str, conversation_history: list = None) -> list:
@@ -339,12 +478,13 @@ class BookMateAgent:
         MAX_HISTORY_TOKENS = 50000  # Reserve ~50k tokens for conversation history
 
         # Get available books for system prompt
-        available_books, self.title_to_slug = self._get_available_books()
+        available_books, self.title_to_slug, doc_types = self._get_available_books()
 
-        # Create system prompt
+        # Create system prompt (use simple version for local LLM)
+        use_simple_prompt = self.llm_provider.provider_name == "local"
         system_prompt = {
             "role": "system",
-            "content": get_system_prompt(available_books),
+            "content": get_system_prompt(available_books, doc_types=doc_types, use_simple=use_simple_prompt),
         }
 
         # Check if this is a new conversation or needs system prompt
@@ -399,8 +539,7 @@ class BookMateAgent:
             Rephrased query, or empty string if rephrasing fails
         """
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",  # Use fast model for rephrasing
+            response = self.llm_provider.chat_completion(
                 messages=[
                     {
                         "role": "system",
@@ -415,7 +554,7 @@ class BookMateAgent:
                 max_tokens=50
             )
 
-            rephrased = response.choices[0].message.content.strip()
+            rephrased = response.content.strip()
             # Remove quotes if LLM added them
             rephrased = rephrased.strip('"\'')
             return rephrased
@@ -465,8 +604,9 @@ class BookMateAgent:
         )
         print(f"{'='*80}\n")
 
-        # Start monitoring
-        with QueryTimer(user_message, None) as timer:
+        # Start monitoring (use no-op timer in ephemeral mode)
+        TimerClass = NoOpQueryTimer if self.ephemeral else QueryTimer
+        with TimerClass(user_message, None) as timer:
             try:
                 if not self.session:
                     raise RuntimeError(
@@ -497,29 +637,42 @@ class BookMateAgent:
                         print(f"  [{i}] TOOL: {content[:100]}...")
                 print()
 
-                # Call OpenAI with function calling
-                response = self.client.chat.completions.create(
-                    model=self.model,
+                # Call LLM provider with function calling
+                # Use temperature=0 for local LLM to improve function calling reliability
+                llm_response = await self.llm_provider.chat_completion_async(
                     messages=conversation_history,
                     tools=self.tools_cache,
                     tool_choice="auto",
+                    temperature=self._get_temperature_for_provider(),
+                    max_tokens=self._get_max_tokens_for_provider(),
                 )
 
-                assistant_message = response.choices[0].message
+                # Extract tool_calls from unified response
+                assistant_message_content = llm_response.content
+                assistant_tool_calls = llm_response.tool_calls
 
                 # Check if the model wants to call tools
-                if assistant_message.tool_calls:
-                    # Execute all tool calls and update conversation history
+                if assistant_tool_calls:
+                    class AssistantMessage:
+                        def __init__(self, content, tool_calls):
+                            self.content = content
+                            self.tool_calls = tool_calls if tool_calls else []
+
+                    assistant_message = AssistantMessage(
+                        content=assistant_message_content,
+                        tool_calls=assistant_tool_calls
+                    )
+
                     conversation_history = await self._handle_tool_calls(
                         assistant_message, conversation_history, timer
                     )
 
-                    # Get final response from OpenAI after tool execution
-                    final_response = self.client.chat.completions.create(
-                        model=self.model, messages=conversation_history
+                    final_llm_response = await self.llm_provider.chat_completion_async(
+                        messages=conversation_history,
+                        max_tokens=self._get_max_tokens_for_provider(),
                     )
 
-                    final_message = final_response.choices[0].message.content
+                    final_message = final_llm_response.content
 
                     return self._finalize_response(
                         final_message, user_message, conversation_history, timer
@@ -527,7 +680,7 @@ class BookMateAgent:
 
                 else:
                     # No tool calls, just return the response
-                    response_text = assistant_message.content
+                    response_text = assistant_message_content
 
                     return self._finalize_response(
                         response_text, user_message, conversation_history, timer

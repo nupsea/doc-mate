@@ -69,6 +69,7 @@ class BM25Retriever:
 
     def search(self, query, topk=7, book_slug=None):
         query_tokens = simple_tokenize(query)
+        logger.info("BM25 search: query='%s', topk=%d, book_slug=%s", query, topk, book_slug)
 
         # Filter by book_slug if provided
         if book_slug:
@@ -80,9 +81,11 @@ class BM25Retriever:
             scores = [(i, self.score(query_tokens, i)) for i in range(self.N)]
 
         ranked = sorted(scores, key=lambda x: -x[1])[:topk]
-        return [
+        results = [
             {"id": self.ids[i], "text": self.raw_docs[i], "score": s} for i, s in ranked
         ]
+        logger.info("BM25 returned %d results", len(results))
+        return results
 
     def id_search(self, query: str, topk=7):
         search_results = self.search(query, topk)

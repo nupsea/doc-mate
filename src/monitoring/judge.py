@@ -3,8 +3,8 @@ LLM-based response quality assessment.
 """
 
 import json
-from openai import OpenAI
 from typing import Optional
+from src.llm.providers import LLMProvider, ModelRouter
 from src.monitoring.metrics import LLMRelevanceScore
 
 
@@ -33,8 +33,17 @@ Score definitions:
 - ADEQUATE: Addresses the query but could be more complete or relevant
 - POOR: Does not adequately address the query or contains irrelevant information"""
 
-    def __init__(self, openai_client: OpenAI):
-        self.client = openai_client
+    def __init__(self, llm_provider: Optional[LLMProvider] = None):
+        """
+        Initialize response judge with LLM provider.
+
+        Args:
+            llm_provider: LLM provider instance (defaults to ModelRouter default)
+        """
+        if llm_provider is None:
+            router = ModelRouter()
+            llm_provider = router.get_provider()
+        self.llm_provider = llm_provider
 
     def assess_response(
         self, query: str, response: str
@@ -46,8 +55,7 @@ Score definitions:
             (score, reasoning)
         """
         try:
-            assessment_result = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+            assessment_result = self.llm_provider.chat_completion(
                 messages=[
                     {
                         "role": "system",
@@ -64,8 +72,20 @@ Score definitions:
                 response_format={"type": "json_object"},
             )
 
-            result_text = assessment_result.choices[0].message.content
-            result = json.loads(result_text)
+            result_text = assessment_result.content
+
+            # Try to parse JSON - handle cases where Ollama adds extra text
+            try:
+                result = json.loads(result_text)
+            except json.JSONDecodeError:
+                # Try to extract JSON object from text
+                import re
+                json_match = re.search(r'\{[^}]+\}', result_text, re.DOTALL)
+                if json_match:
+                    result = json.loads(json_match.group(0))
+                else:
+                    print(f"[WARN] Could not parse JSON from judge response: {result_text[:200]}")
+                    return LLMRelevanceScore.NOT_JUDGED, "Could not parse assessment JSON"
 
             score_str = result.get("score", "NOT_JUDGED").upper()
             reasoning = result.get("reasoning", "")

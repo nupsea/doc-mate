@@ -20,32 +20,51 @@ class BookMateUI:
 
     def __init__(self):
         self.agent = None
-        self.api_key = os.getenv("OPENAI_API_KEY") or ""
+        self.provider = "openai"  # Default provider
         self.model = "gpt-4o-mini"  # Default model
+        self.privacy_mode = "normal"  # Default: normal mode
 
-        if not self.api_key:
-            raise ValueError("OPENAI_API_KEY environment variable not set")
+    async def set_provider_and_model(self, provider: str, model: str, privacy_mode: str):
+        """Set the LLM provider, model, and privacy mode. Reinitialize agent if needed."""
+        changed = (provider != self.provider or model != self.model or privacy_mode != self.privacy_mode)
 
-    async def set_model(self, model: str):
-        """Set the OpenAI model and reinitialize agent if needed."""
-        if model != self.model:
-            print(f"Changing model from {self.model} to {model}")
+        if changed:
+            print(f"Changing from {self.provider}/{self.model} to {provider}/{model} (privacy={privacy_mode})")
+            self.provider = provider
             self.model = model
-            # Properly cleanup old agent before resetting
+            self.privacy_mode = privacy_mode
+
+            # Cleanup old agent before resetting
             if self.agent:
                 try:
                     await self.agent.close()
                     print("Old agent cleaned up successfully")
                 except Exception as e:
                     print(f"Warning: Error cleaning up old agent: {e}")
-            # Reset agent to reinitialize with new model
+            # Reset agent to reinitialize with new settings
             self.agent = None
 
     async def init_agent(self):
         """Initialize the MCP agent connection."""
         if self.agent is None:
-            print(f"Initializing agent with model: {self.model}")
-            self.agent = BookMateAgent(self.api_key, self.model)
+            # Parse privacy mode into flags
+            ephemeral = self.privacy_mode in ["ephemeral", "private"]
+            internal_mode = self.privacy_mode in ["internal", "private"]
+
+            # Set environment for ModelRouter
+            if internal_mode:
+                os.environ["LLM_PROVIDER"] = "local"
+                print(f"{self.privacy_mode.capitalize()} mode - using local provider")
+            else:
+                os.environ["LLM_PROVIDER"] = self.provider
+
+            print(f"Initializing agent with provider={self.provider}, model={self.model}, ephemeral={ephemeral}, internal={internal_mode}")
+            self.agent = BookMateAgent(
+                provider=self.provider,
+                model=self.model,
+                ephemeral=ephemeral,
+                internal_mode=internal_mode
+            )
             try:
                 await self.agent.connect_to_mcp_server()
                 print("Agent initialized and connected to MCP Server")

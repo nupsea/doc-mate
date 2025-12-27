@@ -11,14 +11,14 @@ from src.monitoring.metrics import metrics_collector
 query_id_map = {}
 
 
-async def respond(message, chat_history, selected_book, selected_model, ui):
+async def respond(message, chat_history, selected_book, selected_provider, selected_model, privacy_mode, ui):
     """Handle chat interactions."""
     if not message.strip():
         yield chat_history, message, gr.update(visible=False)
         return
 
-    # Update model if changed (with proper cleanup)
-    await ui.set_model(selected_model)
+    # Update provider/model if changed (with proper cleanup)
+    await ui.set_provider_and_model(selected_provider, selected_model, privacy_mode)
 
     # Add user message with loading indicator for bot
     chat_history.append([message, "Thinking..."])
@@ -56,6 +56,30 @@ def submit_feedback(rating, chat_history):
     return gr.update(visible=False)
 
 
+def update_model_choices(provider, privacy_mode):
+    """Update model dropdown based on selected provider and privacy mode."""
+    # Internal or Private modes force local LLM
+    force_local = privacy_mode in ["internal", "private"]
+
+    if force_local or provider == "local":
+        return gr.update(
+            choices=[("Llama 3.1 8B (Local)", "llama3.1:8b")],
+            value="llama3.1:8b",
+            info="Local Ollama model - good for comparisons"
+        ), gr.update(value="local", interactive=not force_local)
+    else:  # openai (normal or ephemeral modes)
+        return gr.update(
+            choices=[
+                ("GPT-4o Mini (Fast & Cheap)", "gpt-4o-mini"),
+                ("GPT-4o (Balanced)", "gpt-4o"),
+                ("GPT-4 Turbo", "gpt-4-turbo"),
+                ("GPT-3.5 Turbo (Fastest)", "gpt-3.5-turbo"),
+            ],
+            value="gpt-4o-mini",
+            info="OpenAI models (API) - Recommended for complex queries"
+        ), gr.update(interactive=True)
+
+
 def create_chat_interface(ui):
     """Create the chat tab interface."""
 
@@ -74,7 +98,18 @@ def create_chat_interface(ui):
                         value="none",
                         label="Select Doc (optional)",
                         info="Auto-injects document title into queries",
-                        scale=2,
+                        scale=1,
+                    )
+
+                    provider_dropdown = gr.Dropdown(
+                        choices=[
+                            ("OpenAI (API)", "openai"),
+                            ("Local Ollama", "local"),
+                        ],
+                        value="openai",
+                        label="Provider",
+                        info="Select LLM provider",
+                        scale=0.85,
                     )
 
                     model_dropdown = gr.Dropdown(
@@ -86,8 +121,20 @@ def create_chat_interface(ui):
                         ],
                         value="gpt-4o-mini",
                         label="Model",
-                        info="Select OpenAI model for chat",
-                        scale=1,
+                        info="Select model for chat",
+                        scale=0.85,
+                    )
+
+                    privacy_mode = gr.Radio(
+                        choices=[
+                            ("Normal", "normal"),
+                            ("Ephemeral", "ephemeral"),
+                            ("Internal", "internal"),
+                            ("Private", "private")
+                        ],
+                        value="normal",
+                        label="Privacy Mode",
+                        scale=1.3,
                     )
 
                 chatbot = gr.Chatbot(
@@ -134,6 +181,12 @@ def create_chat_interface(ui):
                         - **Section Context**: Ask about specific sections or broad themes
                         - **Hybrid Search**: Uses both keyword matching (BM25) and semantic search
                         - **Rate Responses**: Help improve quality by rating answers
+
+                        **Local LLM (Llama 3.1 8B) Notes:**
+                        - Works well for: Questions, summaries, multi-document comparisons
+                        - Good function calling ability, handles complex queries
+                        - Slower than cloud APIs (especially first request after model load)
+                        - Requires 10GB Docker memory, uses 8B parameter model
                         """
                     )
 
@@ -150,9 +203,9 @@ def create_chat_interface(ui):
                 )
 
         # Event handlers - wrap to pass ui
-        async def handle_submit(msg_text, history, book_sel, model_sel):
+        async def handle_submit(msg_text, history, book_sel, provider_sel, model_sel, privacy):
             async for result_history, result_msg, feedback_update in respond(
-                msg_text, history, book_sel, model_sel, ui
+                msg_text, history, book_sel, provider_sel, model_sel, privacy, ui
             ):
                 yield result_history, result_msg, feedback_update
 
@@ -160,11 +213,27 @@ def create_chat_interface(ui):
             status = submit_feedback(rating, history)
             return status, gr.update(visible=False)
 
+        # Update model dropdown when provider or privacy mode changes
+        provider_dropdown.change(
+            update_model_choices,
+            [provider_dropdown, privacy_mode],
+            [model_dropdown, provider_dropdown]
+        )
+        privacy_mode.change(
+            update_model_choices,
+            [provider_dropdown, privacy_mode],
+            [model_dropdown, provider_dropdown]
+        )
+
         msg.submit(
-            handle_submit, [msg, chatbot, book_dropdown, model_dropdown], [chatbot, msg, feedback_row]
+            handle_submit,
+            [msg, chatbot, book_dropdown, provider_dropdown, model_dropdown, privacy_mode],
+            [chatbot, msg, feedback_row]
         )
         send_btn.click(
-            handle_submit, [msg, chatbot, book_dropdown, model_dropdown], [chatbot, msg, feedback_row]
+            handle_submit,
+            [msg, chatbot, book_dropdown, provider_dropdown, model_dropdown, privacy_mode],
+            [chatbot, msg, feedback_row]
         )
         clear_btn.click(
             lambda: ([], gr.update(visible=False)), None, [chatbot, feedback_row]
