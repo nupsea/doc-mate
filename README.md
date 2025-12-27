@@ -32,10 +32,11 @@ A universal document assistant powered by LLMs that lets you upload and chat wit
 
 ## Current Status
 
-**Version**: 0.1.0 (based on book-mate)
-**Phase**: 0 (Foundation) - Ready for Phase 1 development
+**Version**: 0.2.0
+**Phase**: Phase 2 Complete ✅ (Multi-document types + Local LLM + Privacy modes)
+**Next**: Phase 3 - Graph Database Integration
 
-See [DEVELOPMENT_PHASES.md](DEVELOPMENT_PHASES.md) for complete roadmap.
+See [docs/DEVELOPMENT_PHASES.md](docs/DEVELOPMENT_PHASES.md) for detailed roadmap.
 
 ## Quick Start
 
@@ -288,24 +289,11 @@ doc-mate/
 └── docker-compose.yml    # PostgreSQL + Qdrant services
 ```
 
-## Development Phases
+## Development Roadmap
 
-Doc-Mate is under active development. See [DEVELOPMENT_PHASES.md](DEVELOPMENT_PHASES.md) for complete details.
+**Current Status**: Phase 2 Complete ✅ (Multi-document types + Local LLM + Privacy modes)
 
-**Roadmap Summary:**
-
-| Phase | Status | Key Features |
-|-------|--------|--------------|
-| 0: Foundation | ✅ Complete | Repository setup, taxonomy |
-| 1: Enhanced Parsing | 🚧 Next | Script, conversation, report parsers |
-| 2: Multi-Model | 📅 Planned | OpenAI + Anthropic + Local support |
-| 3: Multimodal | 📅 Planned | Image extraction & search |
-| 4: Doc Features | 📅 Planned | Type-specific analysis tools |
-| 5: UI/UX | 📅 Planned | Enhanced interface |
-| 6: Privacy | 📅 Planned | Complete offline operation |
-| 7: Testing | 📅 Planned | Quality assurance |
-
-**Timeline**: ~12 weeks to full feature set
+See [docs/DEVELOPMENT_PHASES.md](docs/DEVELOPMENT_PHASES.md) for detailed roadmap and implementation plans.
 
 ## Privacy Modes
 
@@ -356,7 +344,9 @@ agent = BookMateAgent(ephemeral=True, internal_mode=True)
 - No Phoenix traces
 - Memory only
 
-See [docs/PRIVACY_MODES.md](docs/PRIVACY_MODES.md) for details.
+See [docs/PRIVACY_MODES.md](docs/PRIVACY_MODES.md) for complete details.
+
+For local LLM setup and testing, see [docs/LOCAL_LLM_REFERENCE.md](docs/LOCAL_LLM_REFERENCE.md).
 
 ## Model Selection
 
