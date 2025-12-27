@@ -213,6 +213,6 @@ qdrant_data
 indexes/
 
 # Architecture and implementation documentation
-docs/
+docs/*.md
 notebooks/*.md
 
