@@ -19,9 +19,6 @@ from src.mcp_client.prompts import (
     get_comparative_citation_reminder,
 )
 
-# Initialize Phoenix tracing once at module load
-init_phoenix_tracing()
-
 
 class BookMateAgent:
     def __init__(
@@ -42,6 +39,12 @@ class BookMateAgent:
             ephemeral: If True, disable metrics/tracing (conversation only in memory, can still use OpenAI)
             internal_mode: If True, force local LLM only (no external API calls)
         """
+        # Set ephemeral mode environment variable BEFORE any metrics imports
+        # This ensures MetricsCollector singleton respects ephemeral mode
+        import os
+        if ephemeral:
+            os.environ["EPHEMERAL_MODE"] = "true"
+
         # Internal mode forces local provider
         if internal_mode:
             provider = "local"
@@ -61,6 +64,10 @@ class BookMateAgent:
         # Privacy mode flags
         self.ephemeral = ephemeral
         self.internal_mode = internal_mode
+
+        # Initialize tracing ONLY if not in ephemeral mode
+        if not self.ephemeral:
+            init_phoenix_tracing()
 
         if self.ephemeral and self.internal_mode:
             print("[INFO] Private mode (ephemeral + internal) - no metrics/tracing, local LLM only")
@@ -176,6 +183,29 @@ class BookMateAgent:
             if not text_content:
                 return f"Tool {tool_name} returned no content."
 
+            # Check if response is a validation error (MCP returns these as text, not exceptions)
+            text_lower = text_content.lower()
+
+            # Auto-retry: If search_multiple_books called with only 1 book, use search_book instead
+            if (tool_name == "search_multiple_books" and
+                "book_identifiers" in arguments and
+                isinstance(arguments["book_identifiers"], list) and
+                len(arguments["book_identifiers"]) == 1 and
+                "validation" in text_lower and "too short" in text_lower):
+
+                print(f"[TOOL] Validation error: search_multiple_books requires 2+ books, got {len(arguments['book_identifiers'])}")
+                print(f"[TOOL] Auto-retrying with search_book instead...")
+
+                # Convert to search_book call
+                retry_arguments = {
+                    "query": arguments["query"],
+                    "book_identifier": arguments["book_identifiers"][0],
+                    "limit": arguments.get("limit_per_book", 5)
+                }
+
+                # Recursive call with corrected tool
+                return await self.call_mcp_tool("search_book", retry_arguments)
+
             return text_content
         except Exception as e:
             error_msg = f"Error calling tool '{tool_name}': {str(e)}"
@@ -216,7 +246,7 @@ class BookMateAgent:
             if not doc_types:
                 doc_types = {"book"}  # Default if no doc_type set
 
-            return f"Available documents (use slug in square brackets for tool calls):\n{book_list}", title_to_slug, doc_types
+            return book_list, title_to_slug, doc_types
         except Exception as e:
             print(f"[WARN] Could not load document list: {e}")
             return "Document list unavailable.", {}, {"book"}
@@ -368,14 +398,15 @@ class BookMateAgent:
             book_id = function_args["book_identifier"]
 
             # Normalize: LLM sometimes returns list instead of string
-            if isinstance(book_id, list):
-                if len(book_id) > 0:
-                    book_id = book_id[0]
-                    function_args["book_identifier"] = book_id
-                    print(f"[TOOL] Normalized list to string: {book_id}")
-                else:
-                    print("[ERROR] Empty list provided for book_identifier")
-                    return function_args, book_title_for_retry
+            if isinstance(book_id, list) and len(book_id) > 0:
+                book_id = book_id[0]
+                function_args["book_identifier"] = book_id
+                print(f"[TOOL] Normalized list to string: {book_id}")
+
+            # Strip brackets if present (LLM may extract [slug] from document list)
+            if isinstance(book_id, str):
+                book_id = book_id.strip("[]")
+                function_args["book_identifier"] = book_id
 
             print(f"[TOOL] LLM provided book_identifier: '{book_id}'")
             print(
@@ -405,17 +436,22 @@ class BookMateAgent:
             # Normalize: LLM sometimes returns string representation instead of list
             if isinstance(book_ids, str):
                 try:
-                    # Try JSON parse first
+                    # Try JSON parse: '["mam", "ili"]'
                     book_ids = json.loads(book_ids)
                     print(f"[TOOL] Normalized JSON string to list: {book_ids}")
                 except (json.JSONDecodeError, ValueError):
                     try:
-                        # Try Python literal eval (safer than eval)
+                        # Try Python literal eval: "['mam', 'ili']"
                         book_ids = ast.literal_eval(book_ids)
                         print(f"[TOOL] Normalized Python literal to list: {book_ids}")
                     except (ValueError, SyntaxError):
-                        print(f"[ERROR] Could not parse book_identifiers: {book_ids}")
-                        return function_args, book_title_for_retry
+                        # Last resort: comma-separated string "mam, ili, ody"
+                        if ',' in book_ids:
+                            book_ids = [s.strip() for s in book_ids.split(',')]
+                            print(f"[TOOL] Normalized comma-separated to list: {book_ids}")
+                        else:
+                            print(f"[ERROR] Could not parse book_identifiers: {book_ids}")
+                            return function_args, book_title_for_retry
 
                 function_args["book_identifiers"] = book_ids
 
@@ -423,6 +459,10 @@ class BookMateAgent:
 
             translated_ids = []
             for book_id in book_ids:
+                # Strip brackets if present (LLM may extract [slug] from document list)
+                if isinstance(book_id, str):
+                    book_id = book_id.strip("[]")
+
                 if (
                     hasattr(self, "title_to_slug")
                     and book_id.lower() in self.title_to_slug
@@ -667,12 +707,32 @@ class BookMateAgent:
                         assistant_message, conversation_history, timer
                     )
 
+                    print("[CHAT] Generating final response from tool results...")
+                    print(f"[CHAT] Conversation history for final call: {len(conversation_history)} messages")
+                    for i, msg in enumerate(conversation_history[-3:]):  # Show last 3 messages
+                        role = msg.get("role", "unknown")
+                        content_preview = str(msg.get("content", ""))[:150]
+                        print(f"  [{i}] {role}: {content_preview}...")
+
+                    # For final response generation, we need to prevent the model from outputting more tool calls
+                    # Small models especially can get confused by seeing tool_calls in history and continue that pattern
+                    # Solution:
+                    # 1. Explicitly pass tools=None to disable function calling
+                    # 2. Use slightly higher temperature to break pattern-copying behavior
+                    # 3. Provide clear instruction about expected output format
+
+                    final_temp = 0.3 if self.llm_provider.provider_name == "local" else 0.5
+
                     final_llm_response = await self.llm_provider.chat_completion_async(
                         messages=conversation_history,
+                        tools=None,  # Explicitly disable tool calling for final response
+                        temperature=final_temp,  # Higher temp to avoid pattern copying
                         max_tokens=self._get_max_tokens_for_provider(),
                     )
 
                     final_message = final_llm_response.content
+                    print(f"[CHAT] Final response length: {len(final_message)} chars")
+                    print(f"[CHAT] Final response: {final_message}")
 
                     return self._finalize_response(
                         final_message, user_message, conversation_history, timer

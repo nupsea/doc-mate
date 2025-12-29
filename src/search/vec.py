@@ -12,6 +12,7 @@ if not logging.getLogger().handlers:
 
 from qdrant_client import QdrantClient, models
 from sentence_transformers import SentenceTransformer
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +21,24 @@ class SemanticRetriever:
 
     COLLECTION = "book_chunks"
 
-    def __init__(self, transformer="BAAI/bge-small-en") -> None:
+    def __init__(self, transformer="BAAI/bge-small-en", max_retries=3) -> None:
         super().__init__()
-        self.embedder = SentenceTransformer(transformer)
+
+        # Load embedder with retry logic for HuggingFace connection issues
+        for attempt in range(max_retries):
+            try:
+                self.embedder = SentenceTransformer(transformer)
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    logger.warning(f"Failed to load {transformer} (attempt {attempt + 1}/{max_retries}): {e}")
+                    logger.info(f"Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"Failed to load {transformer} after {max_retries} attempts")
+                    raise
+
         qdrant_host = os.getenv("QDRANT_HOST", "localhost")
         qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
         self.qdrant = QdrantClient(qdrant_host, port=qdrant_port)

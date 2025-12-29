@@ -43,8 +43,14 @@ class PromptBuilder:
         # Core sections (always included)
         core = self.config["core"]
         sections.append(core["base"])
-        sections.append(core["tool_selection"])
-        sections.append(core["slug_finding"])
+
+        # Add all core sections in order
+        if "tool_selection" in core:
+            sections.append(core["tool_selection"])
+        if "slug_finding" in core:
+            sections.append(core["slug_finding"])
+        if "citations" in core:
+            sections.append(core["citations"])
 
         # Conditional sections based on doc_types
         doc_type_configs = self.config["doc_types"]
@@ -58,11 +64,8 @@ class PromptBuilder:
                         sections.append(section_text)
                         added_sections.add(section_text)
 
-        # Citations (always last before documents)
-        sections.append(core["citations"])
-
-        # Available documents list
-        sections.append(f"\n{available_documents}")
+        # Document list (always last)
+        sections.append(f"Available documents:\n{available_documents}")
 
         return "\n\n".join(sections)
 

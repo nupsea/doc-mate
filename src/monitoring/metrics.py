@@ -79,21 +79,33 @@ class MetricsCollector:
             self.user_rating_counts: dict[int, int] = defaultdict(int)
             self._max_history = 1000  # Keep last 1000 queries in memory
 
-            # Initialize DB persistence if enabled
-            self.use_db = os.getenv("PERSIST_METRICS", "true").lower() == "true"
+            # Initialize DB persistence config (but don't connect yet - lazy init)
+            # Disable metrics if PERSIST_METRICS=false or if running in ephemeral mode
+            persist_enabled = os.getenv("PERSIST_METRICS", "true").lower() == "true"
+            ephemeral_mode = os.getenv("EPHEMERAL_MODE", "false").lower() == "true"
+
+            self.use_db = persist_enabled and not ephemeral_mode
             self.db = None
-            if self.use_db:
-                try:
-                    from src.monitoring.persistence import MetricsPersistence
+            self._db_initialized = False  # Track if we've done lazy init
 
-                    self.db = MetricsPersistence()
-                    print("[METRICS] Database persistence enabled")
+    def _ensure_db_initialized(self):
+        """Lazy initialization of database connection (called on first use)."""
+        if self._db_initialized or not self.use_db:
+            return
 
-                    # Load recent metrics from database
-                    self._load_from_database()
-                except Exception as e:
-                    print(f"[METRICS] Database persistence disabled: {e}")
-                    self.use_db = False
+        try:
+            from src.monitoring.persistence import MetricsPersistence
+
+            self.db = MetricsPersistence()
+            print("[METRICS] Database persistence enabled")
+
+            # Load recent metrics from database
+            self._load_from_database()
+            self._db_initialized = True
+        except Exception as e:
+            print(f"[METRICS] Database persistence disabled: {e}")
+            self.use_db = False
+            self._db_initialized = True
 
     def _load_from_database(self):
         """Load recent metrics from database on startup."""
@@ -139,6 +151,9 @@ class MetricsCollector:
 
     def record_query(self, metric: QueryMetric):
         """Record a query metric."""
+        # Lazy init DB on first use
+        self._ensure_db_initialized()
+
         with self._lock:
             self.queries.append(metric)
 
@@ -176,6 +191,9 @@ class MetricsCollector:
         self, query_id: str, rating: int, comment: Optional[str] = None
     ):
         """Update user feedback for a specific query."""
+        # Lazy init DB on first use
+        self._ensure_db_initialized()
+
         with self._lock:
             # Update in-memory
             updated = False
