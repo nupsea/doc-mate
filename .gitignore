@@ -215,4 +215,4 @@ indexes/
 # Architecture and implementation documentation
 docs/*.md
 notebooks/*.md
-
+TEST*.md
