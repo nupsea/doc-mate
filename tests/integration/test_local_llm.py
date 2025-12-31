@@ -9,7 +9,6 @@ Tests local LLM-specific concerns:
 5. Edge cases specific to local models
 """
 import asyncio
-import os
 from src.mcp_client.agent import BookMateAgent
 
 
@@ -95,7 +94,7 @@ async def test_local_llm():
         try:
             response_text, _, _ = await agent.chat(test['query'])
 
-            print(f"Response received")
+            print("Response received")
             print(f"First 200 chars: {response_text[:200]}...")
             print("-" * 80)
 
@@ -118,13 +117,13 @@ async def test_local_llm():
     print("TEST SUMMARY")
     print("=" * 80)
 
-    print(f"\nOVERALL RESULTS:")
+    print("\nOVERALL RESULTS:")
     print(f"  Total Tests:    {test_results['total']}")
     print(f"  Passed:         {test_results['passed']}")
     print(f"  Errors:         {test_results['errors']}")
 
     if test_results["errors"] > 0:
-        print(f"\nERROR DETAILS:")
+        print("\nERROR DETAILS:")
         for failure in test_results["failures"]:
             print(f"  {failure['name']}")
             print(f"    Query: {failure['query']}")

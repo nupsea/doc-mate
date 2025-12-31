@@ -49,7 +49,7 @@ async def run_comprehensive_test():
             print("ERROR: OPENAI_API_KEY environment variable not set")
             print("Set it or run with: LLM_PROVIDER=local python -m tests.integration.test_comprehensive")
             return False
-        print(f"[SETUP] Initializing agent with OpenAI API...")
+        print("[SETUP] Initializing agent with OpenAI API...")
         agent = BookMateAgent(openai_api_key=api_key)
 
     results = {
@@ -88,7 +88,7 @@ async def run_comprehensive_test():
             print(f"  Preview: {response[:150]}...")
             results["passed"] += 1
         else:
-            print(f"✗ FAIL: Response too short or doesn't mention Odyssey")
+            print("✗ FAIL: Response too short or doesn't mention Odyssey")
             print(f"  Response: {response}")
             results["failed"] += 1
             results["errors"].append("Single document search: Invalid response")
@@ -113,7 +113,7 @@ async def run_comprehensive_test():
             print(f"  Preview: {response[:150]}...")
             results["passed"] += 1
         else:
-            print(f"✗ FAIL: Summary response too short")
+            print("✗ FAIL: Summary response too short")
             print(f"  Response: {response}")
             results["failed"] += 1
             results["errors"].append("Document summary: Response too short")
@@ -138,7 +138,7 @@ async def run_comprehensive_test():
             print(f"  Preview: {response[:150]}...")
             results["passed"] += 1
         else:
-            print(f"✗ FAIL: Chapter summaries response invalid")
+            print("✗ FAIL: Chapter summaries response invalid")
             print(f"  Response: {response}")
             results["failed"] += 1
             results["errors"].append("Chapter summaries: Invalid response")
@@ -167,7 +167,7 @@ async def run_comprehensive_test():
             print(f"  Preview: {response[:150]}...")
             results["passed"] += 1
         else:
-            print(f"✗ FAIL: Multi-document search response incomplete")
+            print("✗ FAIL: Multi-document search response incomplete")
             print(f"  Has Iliad: {has_iliad}, Has Odyssey: {has_odyssey}")
             print(f"  Response: {response[:300]}...")
             results["failed"] += 1
@@ -203,7 +203,7 @@ async def run_comprehensive_test():
             print(f"  Preview: {response[:150]}...")
             results["passed"] += 1
         else:
-            print(f"✗ FAIL: Multi-author search incomplete - did not search all books")
+            print("✗ FAIL: Multi-author search incomplete - did not search all books")
             print(f"  Has Marcus/Meditations: {has_meditations}")
             print(f"  Has Iliad: {has_iliad}")
             print(f"  Has Odyssey: {has_odyssey}")
@@ -231,7 +231,7 @@ async def run_comprehensive_test():
             print(f"  Preview: {response[:150]}...")
             results["passed"] += 1
         else:
-            print(f"✗ FAIL: Conversation search response too short")
+            print("✗ FAIL: Conversation search response too short")
             print(f"  Response: {response}")
             results["failed"] += 1
             results["errors"].append("Conversation search: Response too short")
@@ -256,7 +256,7 @@ async def run_comprehensive_test():
             print(f"  Preview: {response[:150]}...")
             results["passed"] += 1
         else:
-            print(f"✗ FAIL: Tech doc search response too short")
+            print("✗ FAIL: Tech doc search response too short")
             print(f"  Response: {response}")
             results["failed"] += 1
             results["errors"].append("Tech doc search: Response too short")

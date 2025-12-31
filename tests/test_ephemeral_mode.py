@@ -14,7 +14,6 @@ async def test_ephemeral_mode():
 
     # Capture stdout to check for metrics messages
     import io
-    import sys
     from contextlib import redirect_stdout, redirect_stderr
 
     f_out = io.StringIO()
@@ -87,7 +86,6 @@ async def test_ephemeral_internal_mode():
         return True
 
     import io
-    import sys
     from contextlib import redirect_stdout, redirect_stderr
 
     f_out = io.StringIO()

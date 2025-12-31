@@ -2,7 +2,6 @@
 Comprehensive edge case testing for BookMateAgent
 """
 import asyncio
-import os
 from src.mcp_client.agent import BookMateAgent
 
 

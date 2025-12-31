@@ -2,7 +2,6 @@
 Test Gita search quality after re-ingestion
 """
 import asyncio
-import os
 from src.mcp_client.agent import BookMateAgent
 
 
@@ -37,7 +36,7 @@ async def test_gita_search_arjuna():
     print(f"\nResponse length: {len(response)} characters")
     print(f"Has front matter keywords: {has_front_matter}")
     print(f"Has actual content keywords: {has_actual_content}")
-    print(f"\nFirst 500 chars of response:")
+    print("\nFirst 500 chars of response:")
     print(response[:500])
     print("...")
 
@@ -78,7 +77,7 @@ async def test_gita_search_draupadi():
     print(f"\nResponse length: {len(response)} characters")
     print(f"Mentions not found: {mentions_not_found}")
     print(f"Has front matter: {has_front_matter}")
-    print(f"\nFirst 500 chars of response:")
+    print("\nFirst 500 chars of response:")
     print(response[:500])
 
     if not has_front_matter:

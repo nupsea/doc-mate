@@ -7,7 +7,6 @@ Tests cover:
 3. Demo queries (showing Book Mate's advantages over foundation models)
 """
 import asyncio
-import json
 import os
 from src.mcp_client.agent import BookMateAgent
 
@@ -401,7 +400,7 @@ async def test_queries():
                 # Get response (tool calls will appear in logs)
                 response_text, _, _ = await agent.chat(test['query'])
 
-                print(f"✓ Response received")
+                print("✓ Response received")
                 print(f"First 200 chars: {response_text[:200]}...")
                 print("-" * 90)
 
@@ -431,20 +430,20 @@ async def test_queries():
     print("=" * 90)
 
     # Overall statistics
-    print(f"\nOVERALL RESULTS:")
+    print("\nOVERALL RESULTS:")
     print(f"  Total Tests:    {test_results['total']}")
     print(f"  Passed:         {test_results['passed']} ({test_results['passed'] * 100 // test_results['total'] if test_results['total'] > 0 else 0}%)")
     print(f"  Errors:         {test_results['errors']}")
 
     # Category breakdown
-    print(f"\nRESULTS BY CATEGORY:")
+    print("\nRESULTS BY CATEGORY:")
     for category, stats in test_results["by_category"].items():
         pass_rate = stats['passed'] * 100 // stats['total'] if stats['total'] > 0 else 0
         print(f"  {category:12} - {stats['passed']}/{stats['total']} passed ({pass_rate}%), {stats['errors']} errors")
 
     # Error details
     if test_results["errors"] > 0:
-        print(f"\nERROR DETAILS:")
+        print("\nERROR DETAILS:")
         for failure in test_results["failures"]:
             print(f"  [{failure['category']}] {failure['name']}")
             print(f"    Query: {failure['query']}")

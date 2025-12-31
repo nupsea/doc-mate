@@ -99,7 +99,7 @@ async def test_edge_cases():
 
         try:
             response_text, _, _ = await agent.chat(test['query'])
-            print(f"✓ Response received")
+            print("✓ Response received")
             print(f"First 200 chars: {response_text[:200]}...")
             print("-" * 80)
             passed += 1

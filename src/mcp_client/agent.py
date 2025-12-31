@@ -194,7 +194,7 @@ class BookMateAgent:
                 "validation" in text_lower and "too short" in text_lower):
 
                 print(f"[TOOL] Validation error: search_multiple_books requires 2+ books, got {len(arguments['book_identifiers'])}")
-                print(f"[TOOL] Auto-retrying with search_book instead...")
+                print("[TOOL] Auto-retrying with search_book instead...")
 
                 # Convert to search_book call
                 retry_arguments = {

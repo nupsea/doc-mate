@@ -53,7 +53,7 @@ def generate_ground_truth_for_book(slug: str):
     qdrant = QdrantClient(host='localhost', port=6333)
 
     if not qdrant.collection_exists('book_chunks'):
-        print(f"❌ Error: Qdrant collection 'book_chunks' not found")
+        print("❌ Error: Qdrant collection 'book_chunks' not found")
         print("Make sure the book has been ingested and Qdrant is running")
         return False
 

@@ -74,7 +74,7 @@ class ComprehensiveTestSuite:
             is_json = response.strip().startswith('{')
             handled = len(response) > 50
             self.record("search_book: No results", not is_json and handled,
-                       f"Handled gracefully", len(response))
+                       "Handled gracefully", len(response))
         except Exception as e:
             self.record("search_book: No results", False, f"Error: {e}")
 
@@ -113,7 +113,7 @@ class ComprehensiveTestSuite:
 
             if self.provider == "local" and not has_chapters:
                 self.record("get_chapter_summaries: Iliad", True,
-                           f"Context overflow (expected for local)", len(response))
+                           "Context overflow (expected for local)", len(response))
             else:
                 self.record("get_chapter_summaries: Iliad", not is_json and has_chapters,
                            f"JSON:{is_json}, Chapters:{has_chapters}", len(response))
@@ -155,7 +155,7 @@ class ComprehensiveTestSuite:
             is_json = response.strip().startswith('{')
             handled = len(response) > 20
             self.record("edge: Direct answer", not is_json and handled,
-                       f"Handled", len(response))
+                       "Handled", len(response))
         except Exception as e:
             self.record("edge: Direct answer", False, f"Error: {e}")
 
@@ -164,7 +164,7 @@ class ComprehensiveTestSuite:
             is_json = response.strip().startswith('{')
             handled = len(response) > 20
             self.record("edge: Short query", not is_json and handled,
-                       f"Handled", len(response))
+                       "Handled", len(response))
         except Exception as e:
             self.record("edge: Short query", False, f"Error: {e}")
 
@@ -173,7 +173,7 @@ class ComprehensiveTestSuite:
             is_json = response.strip().startswith('{')
             handled = len(response) > 50
             self.record("edge: Non-existent book", not is_json and handled,
-                       f"Handled", len(response))
+                       "Handled", len(response))
         except Exception as e:
             self.record("edge: Non-existent book", False, f"Error: {e}")
 
@@ -188,7 +188,7 @@ class ComprehensiveTestSuite:
             is_json = response2.strip().startswith('{')
             has_context = len(response2) > 50
             self.record("conversation: Multi-turn", not is_json and has_context,
-                       f"Context maintained", len(response2))
+                       "Context maintained", len(response2))
         except Exception as e:
             self.record("conversation: Multi-turn", False, f"Error: {e}")
 
@@ -237,7 +237,7 @@ async def main():
 
     for provider in providers:
         if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
-            print(f"\n⚠️  Skipping OpenAI (no key)")
+            print("\n⚠️  Skipping OpenAI (no key)")
             continue
         suite = ComprehensiveTestSuite(provider=provider)
         await suite.run_all_tests()

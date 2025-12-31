@@ -10,7 +10,6 @@ Tests specific issues encountered with Ollama/local models:
 """
 import asyncio
 from src.mcp_client.agent import BookMateAgent
-from unittest.mock import MagicMock, AsyncMock, patch
 
 
 async def test_parameter_normalization():
@@ -71,17 +70,17 @@ async def test_parameter_normalization():
 
             if actual == test['expected']:
                 print(f"  Result: {actual}")
-                print(f"  Status: PASS")
+                print("  Status: PASS")
                 passed += 1
             else:
                 print(f"  Expected: {test['expected']}")
                 print(f"  Got: {actual}")
-                print(f"  Status: FAIL")
+                print("  Status: FAIL")
                 failed += 1
 
         except Exception as e:
             print(f"  Error: {e}")
-            print(f"  Status: ERROR")
+            print("  Status: ERROR")
             failed += 1
 
     print(f"\nSummary: {passed} passed, {failed} failed")
@@ -146,15 +145,15 @@ async def test_conditional_prompting():
                     all_good = False
 
             if all_good:
-                print(f"  Status: PASS")
+                print("  Status: PASS")
                 passed += 1
             else:
-                print(f"  Status: FAIL")
+                print("  Status: FAIL")
                 failed += 1
 
         except Exception as e:
             print(f"  Error: {e}")
-            print(f"  Status: ERROR")
+            print("  Status: ERROR")
             failed += 1
 
     print(f"\nSummary: {passed} passed, {failed} failed")
@@ -201,15 +200,15 @@ async def test_temperature_settings():
             print(f"  Max tokens: {actual_max_tokens} (expected: {test['expected_max_tokens']}) - {'PASS' if tokens_match else 'FAIL'}")
 
             if temp_match and tokens_match:
-                print(f"  Status: PASS")
+                print("  Status: PASS")
                 passed += 1
             else:
-                print(f"  Status: FAIL")
+                print("  Status: FAIL")
                 failed += 1
 
         except Exception as e:
             print(f"  Error: {e}")
-            print(f"  Status: ERROR")
+            print("  Status: ERROR")
             failed += 1
 
     print(f"\nSummary: {passed} passed, {failed} failed")
@@ -237,7 +236,7 @@ async def test_simple_prompt():
     else:
         print("\nStatus: FAIL - Simple prompt should be shorter")
 
-    print(f"\nSimple prompt content:")
+    print("\nSimple prompt content:")
     print(simple_prompt[:300] + "...")
 
     print("=" * 80)

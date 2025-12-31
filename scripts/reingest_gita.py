@@ -149,7 +149,7 @@ async def main():
         print(f"ERROR: Gita file not found at {gita_path}")
         return
 
-    print(f"\nParsing chapters...")
+    print("\nParsing chapters...")
     chapters = parse_gita_chapters(str(gita_path))
     print(f"✓ Found {len(chapters)} chapters")
 
@@ -165,7 +165,7 @@ async def main():
     # Show chunk distribution by chapter
     from collections import Counter
     chapter_counts = Counter(chunk['metadata']['chapter'] for chunk in chunks)
-    print(f"\nChunks per chapter:")
+    print("\nChunks per chapter:")
     for ch_num in sorted(chapter_counts.keys())[:10]:
         print(f"  Chapter {ch_num}: {chapter_counts[ch_num]} chunks")
     if len(chapter_counts) > 10:
