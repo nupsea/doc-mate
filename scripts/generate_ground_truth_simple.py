@@ -53,7 +53,7 @@ def generate_ground_truth_for_book(slug: str):
     print(f"Loaded {len(chunks)} chunks\n")
 
     if len(chunks) == 0:
-        print(f"❌ Error: No chunks found")
+        print("❌ Error: No chunks found")
         return False
 
     # Generate questions

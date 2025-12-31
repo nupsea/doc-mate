@@ -94,14 +94,14 @@ def read_pdf_with_analysis(pdf_path, max_pages=50):
             print(f"  Likely table: {has_table}")
             print(f"  Likely code: {has_code}")
             if page_num <= 3 or images:
-                print(f"  Sample text:")
+                print("  Sample text:")
                 print("  " + "-"*60)
                 print("  " + text[:300].replace('\n', '\n  '))
                 print("  " + "-"*60)
 
     doc.close()
 
-    print(f"\n" + "="*70)
+    print("\n" + "="*70)
     print("Overall Analysis:")
     print(f"  Pages analyzed: {len(page_indices)} of {total_pages}")
     print(f"  Has images/diagrams: {analysis['has_images']}")

@@ -38,12 +38,12 @@ def test_pdf_reader():
         print("\nParsing PDF...")
         chunks = reader.parse(max_tokens=500, overlap=100)
 
-        print(f"\nResults:")
+        print("\nResults:")
         print(f"- Total chunks: {len(chunks)}")
         print(f"- First chunk ID: {chunks[0]['id']}")
         print(f"- First chunk tokens: {chunks[0]['num_tokens']}")
         print(f"- First chunk chars: {chunks[0]['num_chars']}")
-        print(f"\nFirst 200 characters of text:")
+        print("\nFirst 200 characters of text:")
         print(chunks[0]['text'][:200])
         print("\nPDF reading test successful!")
 

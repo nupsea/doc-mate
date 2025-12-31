@@ -42,6 +42,38 @@ services:
     volumes:
       - phoenix_data:/phoenix-data
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: doc-mate-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+
+    # Resource limits to prevent system crashes
+    deploy:
+      resources:
+        limits:
+          # Limit memory to prevent OOM crashes
+          # 10GB for llama3.1:8b (8GB model + 2GB overhead)
+          memory: 10G
+          cpus: '4.0'  # Limit CPU usage
+        reservations:
+          memory: 8G  # Minimum memory reservation
+
+    environment:
+      # Limit concurrent requests to prevent overload
+      OLLAMA_NUM_PARALLEL: 1
+      OLLAMA_MAX_LOADED_MODELS: 1
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
   app:
     build: .
     container_name: bookmate_app
@@ -56,6 +88,10 @@ services:
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
       PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:4317
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      OLLAMA_BASE_URL: http://ollama:11434/v1
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+      PRIVACY_MODE: ${PRIVACY_MODE:-false}
     ports:
       - "7860:7860"
     volumes:
@@ -74,3 +110,5 @@ volumes:
   phoenix_data: {}
   pgdata:
     driver: local
+  ollama-models:
+    name: doc-mate-ollama-models
