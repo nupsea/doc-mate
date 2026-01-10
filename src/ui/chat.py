@@ -18,7 +18,18 @@ async def respond(message, chat_history, selected_book, selected_provider, selec
         return
 
     # Update provider/model if changed (with proper cleanup)
-    await ui.set_provider_and_model(selected_provider, selected_model, privacy_mode)
+    settings_changed, was_ephemeral, is_ephemeral = await ui.set_provider_and_model(selected_provider, selected_model, privacy_mode)
+
+    # Clear conversation history ONLY when switching FROM ephemeral TO non-ephemeral
+    # This prevents ephemeral queries from being included in future traces
+    # while preserving context when switching TO ephemeral modes
+    if settings_changed and was_ephemeral and not is_ephemeral:
+        print("[UI] Switching from ephemeral to non-ephemeral mode - clearing conversation history to preserve privacy")
+        chat_history = []
+        # Clear query_id map as well
+        query_id_map.clear()
+    elif settings_changed:
+        print("[UI] Settings changed but preserving conversation history for continuity")
 
     # Add user message with loading indicator for bot
     chat_history.append([message, "Thinking..."])

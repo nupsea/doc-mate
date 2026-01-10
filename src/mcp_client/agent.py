@@ -12,7 +12,7 @@ from src.llm.providers import ModelRouter
 from src.llm.config import LLMConfig
 from src.monitoring.metrics import QueryTimer, NoOpQueryTimer, LLMRelevanceScore
 from src.monitoring.judge import ResponseJudge
-from src.monitoring.tracer import init_phoenix_tracing
+from src.monitoring.tracer import init_phoenix_tracing, disable_tracing
 from src.mcp_client.prompts import (
     get_system_prompt,
     get_citation_reminder,
@@ -39,11 +39,20 @@ class BookMateAgent:
             ephemeral: If True, disable metrics/tracing (conversation only in memory, can still use OpenAI)
             internal_mode: If True, force local LLM only (no external API calls)
         """
-        # Set ephemeral mode environment variable BEFORE any metrics imports
-        # This ensures MetricsCollector singleton respects ephemeral mode
+        # Set ephemeral mode environment variables BEFORE any metrics/tracing imports
+        # This ensures MetricsCollector singleton and Phoenix tracing respect ephemeral mode
         import os
         if ephemeral:
             os.environ["EPHEMERAL_MODE"] = "true"
+            os.environ["DISABLE_TRACING"] = "true"  # Disable Phoenix tracing completely
+            # Uninstrument any existing Phoenix tracing (if switching from normal/internal mode)
+            disable_tracing()
+        else:
+            # Clear ephemeral flags when switching back to normal mode
+            if "EPHEMERAL_MODE" in os.environ:
+                del os.environ["EPHEMERAL_MODE"]
+            if "DISABLE_TRACING" in os.environ:
+                del os.environ["DISABLE_TRACING"]
 
         # Internal mode forces local provider
         if internal_mode:

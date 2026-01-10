@@ -120,6 +120,18 @@ agent = BookMateAgent(ephemeral=True, internal_mode=True)
 - Conversation only in memory
 - Cleared on session end
 
+### Implementation
+
+**Ephemeral mode disables:**
+- Metrics database persistence via `EPHEMERAL_MODE=true` env var
+- Phoenix tracing via `DISABLE_TRACING=true` env var
+- OpenTelemetry instrumentation uninstrumented on agent init
+
+**Conversation history handling:**
+When switching privacy modes, conversation history is cleared ONLY when switching FROM ephemeral/private TO normal/internal modes. This ensures:
+- Privacy: Ephemeral queries are not included in future traces
+- UX: Context is preserved when switching TO private modes
+
 ### Model Availability
 
 **Normal & Ephemeral:**
@@ -136,7 +148,10 @@ agent = BookMateAgent(ephemeral=True, internal_mode=True)
 ## FAQ
 
 **Q: Can I switch modes mid-conversation?**
-A: Yes, but it reinitializes the agent and clears conversation history.
+A: Yes! The agent is reinitialized, but conversation history is preserved intelligently:
+- Switching TO ephemeral/private: History preserved (you want privacy NOW but need past context)
+- Switching FROM ephemeral/private: History cleared (prevents ephemeral queries from appearing in future traces)
+- Between non-ephemeral modes: History preserved (Normal ↔ Internal)
 
 **Q: Does ephemeral mode work with OpenAI?**
 A: Yes! Ephemeral only affects local tracking, not LLM choice.

@@ -80,17 +80,29 @@ class MetricsCollector:
             self._max_history = 1000  # Keep last 1000 queries in memory
 
             # Initialize DB persistence config (but don't connect yet - lazy init)
-            # Disable metrics if PERSIST_METRICS=false or if running in ephemeral mode
-            persist_enabled = os.getenv("PERSIST_METRICS", "true").lower() == "true"
-            ephemeral_mode = os.getenv("EPHEMERAL_MODE", "false").lower() == "true"
-
-            self.use_db = persist_enabled and not ephemeral_mode
-            self.db = None
+            # Note: Ephemeral mode check is now dynamic (see should_persist_metrics property)
+            self.db = None  # Lazy-initialized database connection
             self._db_initialized = False  # Track if we've done lazy init
+
+    @property
+    def should_persist_metrics(self) -> bool:
+        """
+        Check if metrics should be persisted (dynamic check of environment).
+
+        This property checks the environment variables each time it's called,
+        allowing the behavior to change when switching between privacy modes
+        without requiring a restart or singleton reset.
+
+        Returns:
+            bool: True if metrics should be persisted to database, False otherwise
+        """
+        persist_enabled = os.getenv("PERSIST_METRICS", "true").lower() == "true"
+        ephemeral_mode = os.getenv("EPHEMERAL_MODE", "false").lower() == "true"
+        return persist_enabled and not ephemeral_mode
 
     def _ensure_db_initialized(self):
         """Lazy initialization of database connection (called on first use)."""
-        if self._db_initialized or not self.use_db:
+        if self._db_initialized or not self.should_persist_metrics:
             return
 
         try:
@@ -104,7 +116,6 @@ class MetricsCollector:
             self._db_initialized = True
         except Exception as e:
             print(f"[METRICS] Database persistence disabled: {e}")
-            self.use_db = False
             self._db_initialized = True
 
     def _load_from_database(self):
@@ -181,7 +192,7 @@ class MetricsCollector:
                 self.user_rating_counts[metric.user_rating] += 1
 
             # Persist to database
-            if self.use_db and self.db:
+            if self.should_persist_metrics and self.db:
                 try:
                     self.db.save_query_metric(metric)
                 except Exception as e:
@@ -213,7 +224,7 @@ class MetricsCollector:
                     break
 
             # Update in database
-            if self.use_db and self.db:
+            if self.should_persist_metrics and self.db:
                 try:
                     self.db.update_user_feedback(query_id, rating, comment)
                     updated = True

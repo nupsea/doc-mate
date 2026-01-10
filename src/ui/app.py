@@ -11,8 +11,8 @@ from src.ui.ingest import create_ingest_interface
 from src.ui.monitoring import create_monitoring_interface
 from src.monitoring.tracer import init_phoenix_tracing
 
-# Initialize Phoenix tracing once at module load
-init_phoenix_tracing()
+# NOTE: Phoenix tracing is initialized on-demand in BookMateUI.__init__
+# to respect ephemeral mode flags. Do NOT initialize here at module load.
 
 
 class BookMateUI:
@@ -25,8 +25,19 @@ class BookMateUI:
         self.privacy_mode = "normal"  # Default: normal mode
 
     async def set_provider_and_model(self, provider: str, model: str, privacy_mode: str):
-        """Set the LLM provider, model, and privacy mode. Reinitialize agent if needed."""
+        """Set the LLM provider, model, and privacy mode. Reinitialize agent if needed.
+
+        Returns:
+            tuple: (changed, was_ephemeral, is_ephemeral)
+                - changed: True if any settings changed
+                - was_ephemeral: True if previous mode was ephemeral
+                - is_ephemeral: True if new mode is ephemeral
+        """
         changed = (provider != self.provider or model != self.model or privacy_mode != self.privacy_mode)
+
+        # Determine if old/new modes are ephemeral (for conversation history handling)
+        old_ephemeral = self.privacy_mode in ["ephemeral", "private"]
+        new_ephemeral = privacy_mode in ["ephemeral", "private"]
 
         if changed:
             print(f"Changing from {self.provider}/{self.model} to {provider}/{model} (privacy={privacy_mode})")
@@ -43,6 +54,8 @@ class BookMateUI:
                     print(f"Warning: Error cleaning up old agent: {e}")
             # Reset agent to reinitialize with new settings
             self.agent = None
+
+        return changed, old_ephemeral, new_ephemeral
 
     async def init_agent(self):
         """Initialize the MCP agent connection."""
