@@ -172,7 +172,7 @@ def search_book_content(query: str, book_identifier: str | int, limit: int = 5):
             doc_type = result_row[0] if result_row else None
 
         if doc_type == "conversation" and len(chunks_with_text) > 5:
-            logger.debug(f"Applying diversity filtering for conversation document")
+            logger.debug("Applying diversity filtering for conversation document")
             chunks_with_text = _diversify_conversation_results(chunks_with_text)
 
         return {

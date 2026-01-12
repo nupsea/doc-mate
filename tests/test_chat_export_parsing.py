@@ -55,7 +55,7 @@ def test_chat_export_pattern():
             print(f"\n  Test {i}: ✗ FAILED - Pattern did not match")
             print(f"    Line: {line}")
 
-    print(f"\n" + "=" * 80)
+    print("\n" + "=" * 80)
     print(f"RESULTS: {passed}/{len(test_lines)} tests passed")
 
     if passed == len(test_lines):

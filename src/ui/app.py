@@ -9,7 +9,6 @@ from src.mcp_client.agent import BookMateAgent
 from src.ui.chat import create_chat_interface
 from src.ui.ingest import create_ingest_interface
 from src.ui.monitoring import create_monitoring_interface
-from src.monitoring.tracer import init_phoenix_tracing
 
 # NOTE: Phoenix tracing is initialized on-demand in BookMateUI.__init__
 # to respect ephemeral mode flags. Do NOT initialize here at module load.

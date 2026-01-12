@@ -60,7 +60,7 @@ def test_conversation_metadata_retrieval():
                         print(f"  ✓ PASSED: All {len(chunks)} chunks include metadata field")
                         passed += 1
                     else:
-                        print(f"  ✗ FAILED: Some chunks missing required fields")
+                        print("  ✗ FAILED: Some chunks missing required fields")
 
     except Exception as e:
         print(f"  ✗ FAILED: {e}")
@@ -90,7 +90,7 @@ def test_conversation_metadata_retrieval():
                 print(f"  ✓ PASSED: All {len(results)} results include metadata field")
                 passed += 1
             else:
-                print(f"  ✗ FAILED: Some results missing required fields")
+                print("  ✗ FAILED: Some results missing required fields")
 
     except Exception as e:
         print(f"  ✗ FAILED: {e}")
@@ -145,11 +145,11 @@ def test_conversation_metadata_retrieval():
                         )
 
                         if has_speaker_info:
-                            print(f"    ✓ Has speaker information")
+                            print("    ✓ Has speaker information")
                         if has_timestamp_info:
-                            print(f"    ✓ Has timestamp information")
+                            print("    ✓ Has timestamp information")
 
-                    print(f"\n  ✓ PASSED: Metadata structure verified for conversation documents")
+                    print("\n  ✓ PASSED: Metadata structure verified for conversation documents")
                     passed += 1
 
     except Exception as e:
