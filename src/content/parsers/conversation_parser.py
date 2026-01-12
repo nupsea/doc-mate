@@ -48,8 +48,11 @@ class ConversationParser(DocumentParser):
 
         # Common conversation patterns
         self.turn_patterns = [
+            # Chat export format: "[29/5/2024, 10: 52:23 am] Speaker: message"
+            # Allow optional whitespace/invisible chars at start
+            r'^\s*\[(\d{1,2}/\d{1,2}/\d{4},\s*\d{1,2}:\s*\d{2}:\s*\d{2}\s*[ap]m)\]\s*([^:\[\]]+):\s*(.+)$',
             # "[00:12:34] Alice: message"
-            r'^\[(\d{2}:\d{2}:\d{2})\]\s*([^:]+):\s*(.+)$',
+            r'^\s*\[(\d{2}:\d{2}:\d{2})\]\s*([^:\[\]]+):\s*(.+)$',
             # "Alice (14:30): message"
             r'^([^(]+)\s*\((\d{2}:\d{2})\):\s*(.+)$',
             # "Alice: message"

@@ -12,6 +12,7 @@ from src.flows.book_query import (
     get_book_summary,
     get_chapter_summaries,
 )
+from src.content.store import PgresStore
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +35,30 @@ class BookToolHandlers:
         Returns:
             List of TextContent with formatted search results
         """
+        book_identifier = self._clean_book_identifier(arguments["book_identifier"])
+
+        # Get document type to adjust search depth
+        # Conversations need more results for diversity and temporal spread
+        store = PgresStore()
+        book_id = store._resolve_book_id(book_identifier)
+        doc_type = None
+        if book_id:
+            with store.conn.cursor() as cur:
+                cur.execute("SELECT doc_type FROM books WHERE book_id = %s", (book_id,))
+                result_row = cur.fetchone()
+                if result_row:
+                    doc_type = result_row[0]
+
+        # Adjust limit based on document type
+        default_limit = 15 if doc_type == "conversation" else 5
+        limit = arguments.get("limit", default_limit)
+
+        logger.debug(f"Document type: {doc_type}, using limit: {limit}")
+
         result = search_book_content(
             query=arguments["query"],
-            book_identifier=self._clean_book_identifier(arguments["book_identifier"]),
-            limit=arguments.get("limit", 5),
+            book_identifier=book_identifier,
+            limit=limit,
         )
 
         # Debug logging
@@ -74,20 +95,33 @@ class BookToolHandlers:
                         )  # Remove leading zeros
 
                 # Format citation based on metadata
+                # Extract timestamp if available (for conversations)
+                # Check multiple possible timestamp fields
+                timestamp = (
+                    metadata.get("timestamp")
+                    or metadata.get("created_at")
+                    or metadata.get("timestamp_start")
+                )
+                timestamp_str = f", Time: {timestamp}" if timestamp else ""
+
                 # For conversations, include speaker information
                 speakers = metadata.get("speakers", [])
+                speaker = metadata.get("speaker") or metadata.get("author")
+
                 if speakers:
                     speakers_str = ", ".join(speakers)
-                    citation = f"[Speakers: {speakers_str}, Source: {chunk_id}]"
+                    citation = f"[Speakers: {speakers_str}{timestamp_str}, Source: {chunk_id}]"
+                elif speaker:
+                    citation = f"[Speaker: {speaker}{timestamp_str}, Source: {chunk_id}]"
                 else:
                     # Try to use section heading from metadata if available
                     heading = metadata.get("heading", "")
                     if heading and len(heading) < 50:  # Use heading if reasonable length
-                        citation = f"[{heading}, Source: {chunk_id}]"
+                        citation = f"[{heading}{timestamp_str}, Source: {chunk_id}]"
                     else:
                         # Fall back to section number
                         # Use generic "Section" instead of assuming "Chapter"
-                        citation = f"[Section {section_num}, Source: {chunk_id}]"
+                        citation = f"[Section {section_num}{timestamp_str}, Source: {chunk_id}]"
 
                 output += f"Passage {i} {citation}:\n{chunk['text']}\n\n---\n\n"
 
@@ -141,7 +175,7 @@ class BookToolHandlers:
         """
         query = arguments["query"]
         book_identifiers = arguments["book_identifiers"]
-        limit_per_book = arguments.get("limit_per_book", 3)
+        user_limit = arguments.get("limit_per_book")  # User-specified limit (if any)
 
         logger.info(
             f"Multi-document search: '{query}' across {len(book_identifiers)} documents"
@@ -150,11 +184,30 @@ class BookToolHandlers:
         # Collect results from each book sequentially (thread-safe)
         all_results = []
         total_found = 0
+        store = PgresStore()
 
         for book_id in book_identifiers:
+            # Adjust limit based on document type (if user didn't specify)
+            if user_limit is None:
+                book_id_resolved = store._resolve_book_id(book_id)
+                doc_type = None
+                if book_id_resolved:
+                    with store.conn.cursor() as cur:
+                        cur.execute("SELECT doc_type FROM books WHERE book_id = %s", (book_id_resolved,))
+                        result_row = cur.fetchone()
+                        if result_row:
+                            doc_type = result_row[0]
+
+                # Conversations need more results for diversity
+                limit_for_this_book = 8 if doc_type == "conversation" else 3
+            else:
+                limit_for_this_book = user_limit
+
+            logger.debug(f"Searching {book_id} with limit={limit_for_this_book}")
+
             # Reuse existing search function
             result = search_book_content(
-                query=query, book_identifier=book_id, limit=limit_per_book
+                query=query, book_identifier=book_id, limit=limit_for_this_book
             )
 
             # Track how many results we found
@@ -198,17 +251,30 @@ class BookToolHandlers:
                                 section_num = parts[1].lstrip("0") or "0"
 
                         # Format citation based on metadata
+                        # Extract timestamp if available (for conversations)
+                        # Check multiple possible timestamp fields
+                        timestamp = (
+                            metadata.get("timestamp")
+                            or metadata.get("created_at")
+                            or metadata.get("timestamp_start")
+                        )
+                        timestamp_str = f", Time: {timestamp}" if timestamp else ""
+
                         # For conversations, include speaker information
                         speakers = metadata.get("speakers", [])
+                        speaker = metadata.get("speaker") or metadata.get("author")
+
                         if speakers:
                             speakers_str = ", ".join(speakers)
-                            citation = f"[Speakers: {speakers_str}, Source: {chunk_id}]"
+                            citation = f"[Speakers: {speakers_str}{timestamp_str}, Source: {chunk_id}]"
+                        elif speaker:
+                            citation = f"[Speaker: {speaker}{timestamp_str}, Source: {chunk_id}]"
                         else:
                             heading = metadata.get("heading", "")
                             if heading and len(heading) < 50:
-                                citation = f"[{heading}, Source: {chunk_id}]"
+                                citation = f"[{heading}{timestamp_str}, Source: {chunk_id}]"
                             else:
-                                citation = f"[Section {section_num}, Source: {chunk_id}]"
+                                citation = f"[Section {section_num}{timestamp_str}, Source: {chunk_id}]"
 
                         output += f"Passage {i} {citation}:\n{chunk['text']}\n\n"
 

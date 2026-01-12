@@ -488,6 +488,44 @@ class BookMateAgent:
 
         return function_args, book_title_for_retry
 
+    def _validate_response_uses_tool_results(
+        self,
+        response_text: str,
+        conversation_history: list
+    ) -> None:
+        """
+        Validate that the response appears to use tool results rather than general knowledge.
+        Logs a warning if the response contains hallucination markers.
+        """
+        # Check if tools were called (look for tool results in history)
+        has_tool_results = any(
+            msg.get("role") == "tool" and msg.get("content")
+            for msg in conversation_history
+        )
+
+        if not has_tool_results:
+            return  # No tool results to validate against
+
+        # Hallucination markers that suggest LLM is using training data instead of tools
+        # Keep only strong indicators, not normal hedge words like "appears/seems"
+        hallucination_markers = [
+            "not well-known",
+            "not widely available",
+            "i couldn't find",
+            "i made an error in my previous response",
+            "unfortunately, i",
+            "i don't have information",
+            "the search returned no",
+            "no results were found",
+        ]
+
+        response_lower = response_text.lower()
+        found_markers = [marker for marker in hallucination_markers if marker in response_lower]
+
+        if found_markers:
+            print(f"[WARN] Response may be ignoring tool results. Hallucination markers detected: {found_markers}")
+            print(f"[WARN] Response preview: {response_text[:200]}...")
+
     def _finalize_response(
         self,
         response_text: str,
@@ -743,6 +781,9 @@ class BookMateAgent:
                     print(f"[CHAT] Final response length: {len(final_message)} chars")
                     print(f"[CHAT] Final response: {final_message}")
 
+                    # Validate that response uses tool results
+                    self._validate_response_uses_tool_results(final_message, conversation_history)
+
                     return self._finalize_response(
                         final_message, user_message, conversation_history, timer
                     )
@@ -750,6 +791,9 @@ class BookMateAgent:
                 else:
                     # No tool calls, just return the response
                     response_text = assistant_message_content
+
+                    # Validate response (will log warning if LLM should have called tools)
+                    self._validate_response_uses_tool_results(response_text, conversation_history)
 
                     return self._finalize_response(
                         response_text, user_message, conversation_history, timer

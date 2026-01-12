@@ -3,10 +3,106 @@ Book query script - plain Python.
 """
 
 import logging
+from datetime import datetime
 from src.content.store import PgresStore
 from src.search.adaptive import AdaptiveRetriever
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_timestamp(timestamp_str):
+    """Parse timestamp string to datetime object. Returns None if parsing fails."""
+    if not timestamp_str:
+        return None
+    try:
+        # Try common timestamp formats
+        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"]:
+            try:
+                return datetime.strptime(timestamp_str, fmt)
+            except ValueError:
+                continue
+        return None
+    except Exception:
+        return None
+
+
+def _diversify_conversation_results(chunks, target_count=None):
+    """
+    Diversify conversation search results to avoid repetition.
+
+    Strategies:
+    1. Temporal spreading - don't cluster results in same time window
+    2. Speaker balancing - if speaker metadata exists, balance across speakers
+    3. Limit results per time window
+
+    Args:
+        chunks: List of chunk dictionaries with text and metadata
+        target_count: Number of results to return (defaults to len(chunks)//2)
+
+    Returns:
+        Diversified list of chunks
+    """
+    if not chunks or len(chunks) <= 3:
+        return chunks  # Too few to diversify
+
+    if target_count is None:
+        target_count = max(5, len(chunks) // 2)  # Return ~half for diversity
+
+    # Extract timestamps and speakers
+    chunks_with_meta = []
+    for chunk in chunks:
+        metadata = chunk.get("metadata", {})
+        timestamp_str = (
+            metadata.get("timestamp")
+            or metadata.get("created_at")
+            or metadata.get("timestamp_start")
+        )
+        timestamp = _parse_timestamp(timestamp_str)
+        speaker = metadata.get("speaker") or metadata.get("author")
+
+        chunks_with_meta.append({
+            "chunk": chunk,
+            "timestamp": timestamp,
+            "speaker": speaker,
+            "original_rank": len(chunks_with_meta)  # Preserve search ranking
+        })
+
+    # Sort by timestamp if available (temporal ordering)
+    chunks_with_meta.sort(key=lambda x: (
+        x["timestamp"] if x["timestamp"] else datetime.max,
+        x["original_rank"]
+    ))
+
+    # Diversify selection
+    selected = []
+    speaker_counts = {}
+    last_timestamp = None
+    MIN_TIME_GAP_SECONDS = 300  # 5 minutes between selected chunks
+
+    for item in chunks_with_meta:
+        # Check speaker balance (max 2 per speaker if we have speakers)
+        speaker = item["speaker"]
+        if speaker:
+            if speaker_counts.get(speaker, 0) >= 2:
+                continue  # Skip - too many from this speaker
+            speaker_counts[speaker] = speaker_counts.get(speaker, 0) + 1
+
+        # Check temporal spacing
+        timestamp = item["timestamp"]
+        if timestamp and last_timestamp:
+            gap = abs((timestamp - last_timestamp).total_seconds())
+            if gap < MIN_TIME_GAP_SECONDS:
+                continue  # Skip - too close in time to previous result
+
+        # Select this chunk
+        selected.append(item["chunk"])
+        last_timestamp = timestamp
+
+        if len(selected) >= target_count:
+            break
+
+    logger.debug(f"Diversified {len(chunks)} conversation results to {len(selected)}")
+    return selected
 
 
 def validate_book_exists(book_identifier: str | int):
@@ -67,6 +163,17 @@ def search_book_content(query: str, book_identifier: str | int, limit: int = 5):
             )
 
         logger.debug(f"Retrieved {len(chunks_with_text)} chunks with text")
+
+        # Apply diversity filtering for conversation documents
+        # This prevents repetitive results from the same time window/speaker
+        with store.conn.cursor() as cur:
+            cur.execute("SELECT doc_type FROM books WHERE book_id = %s", (book_id,))
+            result_row = cur.fetchone()
+            doc_type = result_row[0] if result_row else None
+
+        if doc_type == "conversation" and len(chunks_with_text) > 5:
+            logger.debug(f"Applying diversity filtering for conversation document")
+            chunks_with_text = _diversify_conversation_results(chunks_with_text)
 
         return {
             "query": query,

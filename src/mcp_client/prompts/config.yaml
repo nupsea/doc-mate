@@ -11,7 +11,10 @@ core:
     1. Use tools to retrieve relevant information from documents
     2. Answer the user's question in natural language using the retrieved information
 
-    IMPORTANT: Answer in plain text. Do NOT output JSON, tool syntax, or explain which tools you used.
+    IMPORTANT:
+    - Answer in plain text. Do NOT output JSON, tool syntax, or explain which tools you used.
+    - For follow-up questions like "more details" or "tell me more", do another search with the same topic/entity, NOT get_chapter_summaries.
+    - Answer ONLY from tool results. Stay consistent with information from previous searches.
 
   tool_selection: |
     TOOL SELECTION:
@@ -74,8 +77,9 @@ simple:
 
     IMPORTANT RULES:
     - Answer in natural language sentences - NO JSON, NO tool syntax
-    - Use the information returned by tools
+    - Answer ONLY from tool results. Never use your training data.
     - Do NOT explain which tools you used or describe your process
+    - For follow-up questions like "more details" or "tell me more", do another search_book with the same topic, NOT get_chapter_summaries
 
     TOOLS:
     - Multiple documents: search_multiple_books with ALL slugs

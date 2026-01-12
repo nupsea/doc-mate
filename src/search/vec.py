@@ -112,7 +112,12 @@ class SemanticRetriever:
         ).points
 
         results = [
-            {"id": h.payload["id"], "text": h.payload["text"], "score": h.score}
+            {
+                "id": h.payload["id"],
+                "text": h.payload["text"],
+                "score": h.score,
+                "metadata": h.payload.get("metadata", {})
+            }
             for h in hits
         ]
         logger.info("Qdrant returned %d results", len(results))
@@ -139,12 +144,16 @@ class SemanticRetriever:
                     collection_name=SemanticRetriever.COLLECTION, ids=[point_id]
                 )
                 if point:
-                    results.append(
-                        {"id": point[0].payload["id"], "text": point[0].payload["text"]}
-                    )
+                    # Return full payload including metadata for citations
+                    payload = point[0].payload
+                    results.append({
+                        "id": payload.get("id", chunk_id),
+                        "text": payload.get("text", ""),
+                        "metadata": payload.get("metadata", {})
+                    })
             except Exception as e:
                 logger.warning("Could not retrieve chunk %s: %s", chunk_id, e)
-                results.append({"id": chunk_id, "text": "[Text not found]"})
+                results.append({"id": chunk_id, "text": "[Text not found]", "metadata": {}})
         return results
 
     def cleanup(self):
