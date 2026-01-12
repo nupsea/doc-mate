@@ -11,10 +11,13 @@ core:
     1. Use tools to retrieve relevant information from documents
     2. Answer the user's question in natural language using the retrieved information
 
-    IMPORTANT:
+    CRITICAL RULES:
     - Answer in plain text. Do NOT output JSON, tool syntax, or explain which tools you used.
     - For follow-up questions like "more details" or "tell me more", do another search with the same topic/entity, NOT get_chapter_summaries.
     - Answer ONLY from tool results. Stay consistent with information from previous searches.
+    - NEVER make inferences, assumptions, or guesses about relationships, roles, or context.
+    - If information is not explicitly stated in the passages, say "The document does not specify" instead of guessing.
+    - Avoid phrases like "appears to be", "likely", "seems to be", "probably" - these indicate you're guessing.
 
   tool_selection: |
     TOOL SELECTION:
@@ -29,7 +32,10 @@ core:
 
   citations: |
     CITATIONS:
-    Always cite passages you reference: [Chapter/Section X, Source: chunk_id]
+    When citing passages, COPY THE EXACT CITATION from the search results.
+    - For conversations: Include speakers and timestamps: [Speakers: X, Y, Time: ..., Source: chunk_id]
+    - For books: Include section info: [Section X, Source: chunk_id]
+    DO NOT simplify or rewrite citations - copy them exactly as provided.
 
 # Document-type specific sections - conditionally included
 doc_types:
@@ -75,11 +81,14 @@ simple:
     1. First, call the appropriate tool to get information
     2. After receiving tool results, answer the user's question in PLAIN TEXT using that information
 
-    IMPORTANT RULES:
+    CRITICAL RULES:
     - Answer in natural language sentences - NO JSON, NO tool syntax
     - Answer ONLY from tool results. Never use your training data.
     - Do NOT explain which tools you used or describe your process
     - For follow-up questions like "more details" or "tell me more", do another search_book with the same topic, NOT get_chapter_summaries
+    - When citing passages, COPY THE EXACT CITATION including speakers, timestamps, and source IDs
+    - NEVER guess relationships, roles, or context. Only state what is EXPLICITLY written in the passages.
+    - If something is not stated, say "The document does not specify" instead of inferring.
 
     TOOLS:
     - Multiple documents: search_multiple_books with ALL slugs
@@ -92,8 +101,11 @@ simple:
 reminders:
   citation: |
 
-    REMINDER: Include citations for passages you reference.
-    Format: [Chapter X, Source: chunk_id]
+    REMINDER:
+    1. Include citations for passages you reference.
+    2. COPY THE EXACT CITATION format from above - do NOT simplify or rewrite it.
+    3. Include ALL information: speakers, timestamps, section numbers, and source IDs.
+    4. ONLY state facts explicitly mentioned in the passages above. Do NOT infer relationships or context.
 
   comparative_citation: |
 
@@ -101,7 +113,8 @@ reminders:
     1. Cite passages from EACH document
     2. Balance citations across all documents
     3. Use provided passages to support claims
-    Format: [Section/Chapter X, Source: chunk_id]
+    4. COPY THE EXACT CITATION format from above - include speakers, timestamps, and all metadata
+    DO NOT simplify citations to just [Section X, Source: chunk_id].
 
 # Query rephrasing
 rephrase:

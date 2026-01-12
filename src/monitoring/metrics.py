@@ -161,7 +161,13 @@ class MetricsCollector:
             print(f"[METRICS] Failed to load from database: {e}")
 
     def record_query(self, metric: QueryMetric):
-        """Record a query metric."""
+        """Record a query metric (never called for ephemeral/private queries)."""
+        # SAFETY CHECK: Never persist ephemeral queries (defense in depth)
+        # NoOpQueryTimer should prevent this, but check query_id as failsafe
+        if metric.query_id and metric.query_id.startswith("ephemeral_"):
+            print("[METRICS] WARNING: Attempted to record ephemeral query - ignoring")
+            return
+
         # Lazy init DB on first use
         self._ensure_db_initialized()
 
@@ -235,6 +241,9 @@ class MetricsCollector:
 
     def get_statistics(self) -> dict:
         """Get current statistics."""
+        # Ensure DB is initialized and loaded (lazy init)
+        self._ensure_db_initialized()
+
         with self._lock:
             total_queries = len(self.queries)
 
@@ -326,6 +335,9 @@ class MetricsCollector:
 
     def get_recent_queries(self, limit: int = 20) -> list[dict]:
         """Get recent queries for display."""
+        # Ensure DB is initialized and loaded (lazy init)
+        self._ensure_db_initialized()
+
         with self._lock:
             return [
                 {

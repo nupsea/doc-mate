@@ -2,10 +2,10 @@
 Conversation parser - Turn-based chunking for chat logs, transcripts, meetings.
 
 Supports formats:
-- "Speaker: message" (Slack, Discord)
+- "Speaker: message" (common chat format)
 - "[00:00] Speaker: message" (with timestamps)
 - "Speaker (HH:MM): message"
-- WhatsApp exports
+- "[DD/MM/YYYY, HH:MM:SS am/pm] Speaker: message" (chat exports)
 """
 
 import re
@@ -47,18 +47,20 @@ class ConversationParser(DocumentParser):
         self.enc = tiktoken.get_encoding("cl100k_base")
 
         # Common conversation patterns
+        # Order matters: more specific patterns first
         self.turn_patterns = [
-            # Chat export format: "[29/5/2024, 10: 52:23 am] Speaker: message"
-            # Allow optional whitespace/invisible chars at start
-            r'^\s*\[(\d{1,2}/\d{1,2}/\d{4},\s*\d{1,2}:\s*\d{2}:\s*\d{2}\s*[ap]m)\]\s*([^:\[\]]+):\s*(.+)$',
+            # Chat export format: "[29/5/2024, 10:52:23 am] Speaker: message"
+            # More strict pattern to avoid capturing malformed lines
+            r'^\s*\[(\d{1,2}/\d{1,2}/\d{2,4},\s*\d{1,2}:\s*\d{2}(?::\s*\d{2})?\s*(?:[ap]m)?)\]\s*([^:\[\]]+?):\s*(.+)$',
             # "[00:12:34] Alice: message"
-            r'^\s*\[(\d{2}:\d{2}:\d{2})\]\s*([^:\[\]]+):\s*(.+)$',
+            r'^\s*\[(\d{2}:\d{2}:\d{2})\]\s*([^:\[\]]+?):\s*(.+)$',
             # "Alice (14:30): message"
-            r'^([^(]+)\s*\((\d{2}:\d{2})\):\s*(.+)$',
-            # "Alice: message"
-            r'^([^:]+):\s*(.+)$',
+            r'^([^(]+?)\s*\((\d{2}:\d{2})\):\s*(.+)$',
+            # "Alice: message" (catch-all, last resort)
+            # Use reluctant quantifier and require colon+space to be more strict
+            r'^([^:]+?):\s+(.+)$',
             # "Speaker> message" (some chat systems)
-            r'^([^>]+)>\s*(.+)$',
+            r'^([^>]+?)>\s*(.+)$',
         ]
 
     def _get_doc_type(self) -> DocumentType:

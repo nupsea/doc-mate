@@ -506,8 +506,7 @@ class BookMateAgent:
         if not has_tool_results:
             return  # No tool results to validate against
 
-        # Hallucination markers that suggest LLM is using training data instead of tools
-        # Keep only strong indicators, not normal hedge words like "appears/seems"
+        # Hallucination markers that suggest LLM is inferring instead of citing
         hallucination_markers = [
             "not well-known",
             "not widely available",
@@ -517,6 +516,12 @@ class BookMateAgent:
             "i don't have information",
             "the search returned no",
             "no results were found",
+            "appears to be a",
+            "seems to be a",
+            "likely",
+            "probably",
+            "suggests that",
+            "indicating that",
         ]
 
         response_lower = response_text.lower()
