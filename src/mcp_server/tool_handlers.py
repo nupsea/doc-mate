@@ -1,5 +1,5 @@
 """
-Tool handlers for book-related MCP operations.
+Tool handlers for document-related MCP operations.
 
 Separates business logic from MCP protocol definitions.
 """
@@ -7,44 +7,44 @@ Separates business logic from MCP protocol definitions.
 import logging
 from mcp.types import TextContent
 
-from src.flows.book_query import (
-    search_book_content,
-    get_book_summary,
-    get_chapter_summaries,
+from src.flows.document_query import (
+    search_document_content,
+    get_document_summary,
+    get_document_chapters,
 )
 from src.content.store import PgresStore
 
 logger = logging.getLogger(__name__)
 
 
-class BookToolHandlers:
-    """Handles all book-related tool requests."""
+class DocumentToolHandlers:
+    """Handles all document-related tool requests."""
 
     @staticmethod
-    def _clean_book_identifier(identifier: str) -> str:
-        """Strip brackets from book identifier (e.g., '[dth]' -> 'dth')."""
+    def _clean_doc_identifier(identifier: str) -> str:
+        """Strip brackets from document identifier (e.g., '[dth]' -> 'dth')."""
         return identifier.strip('[]')
 
-    def handle_search_book(self, arguments: dict) -> list[TextContent]:
+    def handle_search_document(self, arguments: dict) -> list[TextContent]:
         """
-        Handle single-book search requests.
+        Handle single-document search requests.
 
         Args:
-            arguments: Dict with 'query', 'book_identifier', 'limit' (optional)
+            arguments: Dict with 'query', 'doc_identifier', 'limit' (optional)
 
         Returns:
             List of TextContent with formatted search results
         """
-        book_identifier = self._clean_book_identifier(arguments["book_identifier"])
+        doc_identifier = self._clean_doc_identifier(arguments["doc_identifier"])
 
         # Get document type to adjust search depth
         # Conversations need more results for diversity and temporal spread
         store = PgresStore()
-        book_id = store._resolve_book_id(book_identifier)
+        doc_id = store._resolve_doc_id(doc_identifier)
         doc_type = None
-        if book_id:
+        if doc_id:
             with store.conn.cursor() as cur:
-                cur.execute("SELECT doc_type FROM books WHERE book_id = %s", (book_id,))
+                cur.execute("SELECT doc_type FROM documents WHERE doc_id = %s", (doc_id,))
                 result_row = cur.fetchone()
                 if result_row:
                     doc_type = result_row[0]
@@ -55,15 +55,15 @@ class BookToolHandlers:
 
         logger.debug(f"Document type: {doc_type}, using limit: {limit}")
 
-        result = search_book_content(
+        result = search_document_content(
             query=arguments["query"],
-            book_identifier=book_identifier,
+            doc_identifier=doc_identifier,
             limit=limit,
         )
 
         # Debug logging
         logger.debug(
-            f"Search result for '{arguments['query']}' in '{arguments['book_identifier']}':"
+            f"Search result for '{arguments['query']}' in '{arguments['doc_identifier']}':"
         )
         logger.debug(f"  - num_results: {result['num_results']}")
         logger.debug(f"  - chunk_ids: {result.get('chunk_ids', [])}")
@@ -75,11 +75,11 @@ class BookToolHandlers:
 
         if result["num_results"] == 0:
             output = (
-                f"No results found for '{result['query']}' in book '{result['book']}'."
+                f"No results found for '{result['query']}' in document '{result['document']}'."
             )
         else:
             output = (
-                f"Found {result['num_results']} results for '{result['query']}' in {result['book']}:\n\n"
+                f"Found {result['num_results']} results for '{result['query']}' in {result['document']}:\n\n"
             )
             for i, chunk in enumerate(result["chunks"], 1):
                 chunk_id = chunk.get("id", "unknown")
@@ -127,118 +127,118 @@ class BookToolHandlers:
 
         return [TextContent(type="text", text=output)]
 
-    def handle_get_book_summary(self, arguments: dict) -> list[TextContent]:
+    def handle_get_document_summary(self, arguments: dict) -> list[TextContent]:
         """
-        Handle book summary requests.
+        Handle document summary requests.
 
         Args:
-            arguments: Dict with 'book_identifier'
+            arguments: Dict with 'doc_identifier'
 
         Returns:
-            List of TextContent with book summary
+            List of TextContent with document summary
         """
-        result = get_book_summary(self._clean_book_identifier(arguments["book_identifier"]))
+        result = get_document_summary(self._clean_doc_identifier(arguments["doc_identifier"]))
         return [
             TextContent(type="text", text=result["summary"] or "No summary available")
         ]
 
-    def handle_get_chapter_summaries(self, arguments: dict) -> list[TextContent]:
+    def handle_get_document_chapters(self, arguments: dict) -> list[TextContent]:
         """
-        Handle chapter summaries requests.
+        Handle chapter/section summaries requests.
 
         Args:
-            arguments: Dict with 'book_identifier'
+            arguments: Dict with 'doc_identifier'
 
         Returns:
-            List of TextContent with all chapter summaries
+            List of TextContent with all section summaries
         """
-        result = get_chapter_summaries(self._clean_book_identifier(arguments["book_identifier"]))
+        result = get_document_chapters(self._clean_doc_identifier(arguments["doc_identifier"]))
 
-        output = f"Found {result['num_chapters']} chapters:\n\n"
+        output = f"Found {result['num_chapters']} sections:\n\n"
         for ch in result["chapters"]:
-            output += f"Chapter {ch['chapter_id']}:\n{ch['summary']}\n\n"
+            output += f"Section {ch['chapter_id']}:\n{ch['summary']}\n\n"
 
         return [TextContent(type="text", text=output)]
 
-    def handle_search_multiple_books(self, arguments: dict) -> list[TextContent]:
+    def handle_search_multiple_documents(self, arguments: dict) -> list[TextContent]:
         """
         Handle multi-document comparative search requests.
 
         Args:
             arguments: Dict with:
                 - 'query': Search query to use across all documents
-                - 'book_identifiers': List of document slugs to search
-                - 'limit_per_book': Optional, number of results per document (default: 3)
+                - 'doc_identifiers': List of document slugs to search
+                - 'limit_per_doc': Optional, number of results per document (default: 3)
 
         Returns:
             List of TextContent with formatted comparative results
         """
         query = arguments["query"]
-        book_identifiers = arguments["book_identifiers"]
-        user_limit = arguments.get("limit_per_book")  # User-specified limit (if any)
+        doc_identifiers = arguments["doc_identifiers"]
+        user_limit = arguments.get("limit_per_doc")  # User-specified limit (if any)
 
         logger.info(
-            f"Multi-document search: '{query}' across {len(book_identifiers)} documents"
+            f"Multi-document search: '{query}' across {len(doc_identifiers)} documents"
         )
 
-        # Collect results from each book sequentially (thread-safe)
+        # Collect results from each document sequentially (thread-safe)
         all_results = []
         total_found = 0
         store = PgresStore()
 
-        for book_id in book_identifiers:
+        for doc_id in doc_identifiers:
             # Adjust limit based on document type (if user didn't specify)
             if user_limit is None:
-                book_id_resolved = store._resolve_book_id(book_id)
+                doc_id_resolved = store._resolve_doc_id(doc_id)
                 doc_type = None
-                if book_id_resolved:
+                if doc_id_resolved:
                     with store.conn.cursor() as cur:
-                        cur.execute("SELECT doc_type FROM books WHERE book_id = %s", (book_id_resolved,))
+                        cur.execute("SELECT doc_type FROM documents WHERE doc_id = %s", (doc_id_resolved,))
                         result_row = cur.fetchone()
                         if result_row:
                             doc_type = result_row[0]
 
                 # Conversations need more results for diversity
-                limit_for_this_book = 8 if doc_type == "conversation" else 3
+                limit_for_this_doc = 8 if doc_type == "conversation" else 3
             else:
-                limit_for_this_book = user_limit
+                limit_for_this_doc = user_limit
 
-            logger.debug(f"Searching {book_id} with limit={limit_for_this_book}")
+            logger.debug(f"Searching {doc_id} with limit={limit_for_this_doc}")
 
             # Reuse existing search function
-            result = search_book_content(
-                query=query, book_identifier=book_id, limit=limit_for_this_book
+            result = search_document_content(
+                query=query, doc_identifier=doc_id, limit=limit_for_this_doc
             )
 
             # Track how many results we found
             num_results = result.get("num_results", 0)
             total_found += num_results
 
-            logger.debug(f"  - {book_id}: {num_results} results")
+            logger.debug(f"  - {doc_id}: {num_results} results")
 
-            # Store result with book info for formatting
-            all_results.append({"book": book_id, "result": result})
+            # Store result with document info for formatting
+            all_results.append({"document": doc_id, "result": result})
 
         # Format combined output with clear document separation
         if total_found == 0:
-            output = f"Found 0 results for '{query}' in any of the {len(book_identifiers)} documents searched."
+            output = f"Found 0 results for '{query}' in any of the {len(doc_identifiers)} documents searched."
         else:
-            output = f"Found {total_found} results - Comparative search for '{query}' across {len(book_identifiers)} documents:\n\n"
+            output = f"Found {total_found} results - Comparative search for '{query}' across {len(doc_identifiers)} documents:\n\n"
             output += "=" * 80 + "\n\n"
 
-            for book_data in all_results:
-                book_id = book_data["book"]
-                result = book_data["result"]
+            for doc_data in all_results:
+                doc_id = doc_data["document"]
+                result = doc_data["result"]
 
                 # Document header
-                output += f"### {book_id.upper()} ###\n\n"
+                output += f"### {doc_id.upper()} ###\n\n"
 
                 if result.get("error"):
                     output += f"Error: {result['error']}\n\n"
                 elif result["num_results"] == 0:
                     output += "No results found in this document.\n\n"
                 else:
-                    # Format passages for this book
+                    # Format passages for this document
                     for i, chunk in enumerate(result["chunks"], 1):
                         chunk_id = chunk.get("id", "unknown")
                         metadata = chunk.get("metadata", {})
@@ -287,7 +287,7 @@ class BookToolHandlers:
         Dispatch tool call to the appropriate handler method.
 
         Uses reflection to find handler method by name convention:
-        Tool 'search_book' -> method 'handle_search_book'
+        Tool 'search_document' -> method 'handle_search_document'
 
         Args:
             tool_name: Name of the tool to invoke

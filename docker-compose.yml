@@ -98,6 +98,7 @@ services:
       - ./DATA:/app/DATA
       - ./INDEXES:/app/INDEXES
       - ./src:/app/src
+      - ./hf_cache:/root/.cache/huggingface
     depends_on:
       postgres:
         condition: service_healthy

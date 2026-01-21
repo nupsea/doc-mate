@@ -2,8 +2,8 @@
 -- This runs only on first Postgres container startup
 -- The database 'booksdb' is already created by POSTGRES_DB environment variable
 
-CREATE TABLE IF NOT EXISTS books (
-    book_id SERIAL PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS documents (
+    doc_id SERIAL PRIMARY KEY,
     slug VARCHAR(50) UNIQUE NOT NULL,
     title TEXT NOT NULL,
     author TEXT,
@@ -16,23 +16,38 @@ CREATE TABLE IF NOT EXISTS books (
 );
 
 -- Indexes for multi-format support
-CREATE INDEX IF NOT EXISTS idx_books_doc_type ON books(doc_type);
-CREATE INDEX IF NOT EXISTS idx_books_metadata ON books USING GIN (metadata);
+CREATE INDEX IF NOT EXISTS idx_documents_doc_type ON documents(doc_type);
+CREATE INDEX IF NOT EXISTS idx_documents_metadata ON documents USING GIN (metadata);
 
 CREATE TABLE IF NOT EXISTS chapter_summaries (
-    book_id INT NOT NULL,
+    doc_id INT NOT NULL,
     chapter_id INT NOT NULL,
     summary TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
-    PRIMARY KEY (book_id, chapter_id),
-    FOREIGN KEY (book_id) REFERENCES books(book_id) ON DELETE CASCADE
+    PRIMARY KEY (doc_id, chapter_id),
+    FOREIGN KEY (doc_id) REFERENCES documents(doc_id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS book_summaries (
-    book_id INT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS document_summaries (
+    doc_id INT PRIMARY KEY,
     summary TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
-    FOREIGN KEY (book_id) REFERENCES books(book_id) ON DELETE CASCADE
+    FOREIGN KEY (doc_id) REFERENCES documents(doc_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS bm25_index (
+    term TEXT NOT NULL,
+    chunk_id TEXT NOT NULL,
+    frequency INT NOT NULL,
+    PRIMARY KEY (term, chunk_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bm25_term ON bm25_index(term);
+CREATE INDEX IF NOT EXISTS idx_bm25_chunk_id ON bm25_index(chunk_id);
+
+CREATE TABLE IF NOT EXISTS bm25_doc_lens (
+    chunk_id TEXT PRIMARY KEY,
+    doc_len INT NOT NULL
 );
 
 -- Metrics tables for monitoring
@@ -41,7 +56,7 @@ CREATE TABLE IF NOT EXISTS query_metrics (
     timestamp TIMESTAMP NOT NULL,
     query TEXT NOT NULL,
     response TEXT,
-    book_slug VARCHAR(50),
+    doc_slug VARCHAR(50),
     latency_ms FLOAT NOT NULL,
     success BOOLEAN NOT NULL,
     error_message TEXT,
@@ -60,5 +75,5 @@ CREATE TABLE IF NOT EXISTS query_metrics (
 );
 
 CREATE INDEX IF NOT EXISTS idx_query_metrics_timestamp ON query_metrics(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_query_metrics_book_slug ON query_metrics(book_slug);
+CREATE INDEX IF NOT EXISTS idx_query_metrics_doc_slug ON query_metrics(doc_slug);
 CREATE INDEX IF NOT EXISTS idx_query_metrics_success ON query_metrics(success);

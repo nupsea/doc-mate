@@ -5,16 +5,18 @@ Main Gradio application for Doc Mate.
 import gradio as gr
 import asyncio
 import os
+import threading
 from src.mcp_client.agent import BookMateAgent
 from src.ui.chat import create_chat_interface
 from src.ui.ingest import create_ingest_interface
 from src.ui.monitoring import create_monitoring_interface
+from src.flows.document_query import preload_retriever
 
 # NOTE: Phoenix tracing is initialized on-demand in BookMateUI.__init__
 # to respect ephemeral mode flags. Do NOT initialize here at module load.
 
 
-class BookMateUI:
+class DocMateUI:
     """Main UI controller managing the MCP agent."""
 
     def __init__(self):
@@ -86,7 +88,7 @@ class BookMateUI:
                 raise
 
     async def chat(
-        self, message: str, history: list, selected_book: str = None
+        self, message: str, history: list, selected_doc: str = None
     ) -> tuple[str, str]:
         """
         Handle chat messages with the agent.
@@ -94,7 +96,7 @@ class BookMateUI:
         Args:
             message: User message
             history: Gradio chat history format
-            selected_book: Selected book slug (optional)
+            selected_doc: Selected document slug (optional)
 
         Returns:
             (agent_response, query_id)
@@ -112,36 +114,36 @@ class BookMateUI:
                     print(f"Init attempt {attempt + 1} failed, retrying...")
                     await asyncio.sleep(2)
 
-        # Auto-inject book title if selected
+        # Auto-inject document title if selected
         print(f"\n[UI] Original message: {message}")
-        print(f"[UI] Selected book slug from dropdown: {selected_book}")
+        print(f"[UI] Selected document slug from dropdown: {selected_doc}")
 
-        if selected_book and selected_book != "none":
-            # Get book title from slug
+        if selected_doc and selected_doc != "none":
+            # Get document title from slug
             from src.content.store import PgresStore
 
             try:
                 store = PgresStore()
                 with store.conn.cursor() as cur:
                     cur.execute(
-                        "SELECT title FROM books WHERE slug = %s", (selected_book,)
+                        "SELECT title FROM documents WHERE slug = %s", (selected_doc,)
                     )
                     result = cur.fetchone()
                     if result:
-                        book_title = result[0]
+                        doc_title = result[0]
                         print(
-                            f"[UI] Found book title for slug '{selected_book}': {book_title}"
+                            f"[UI] Found document title for slug '{selected_doc}': {doc_title}"
                         )
                         # Only inject if not already mentioned
-                        if book_title.lower() not in message.lower():
-                            message = f"{message} (for the document '{book_title}')"
+                        if doc_title.lower() not in message.lower():
+                            message = f"{message} (for the document '{doc_title}')"
                             print(f"[UI] Injected title into message: {message}")
                         else:
                             print("[UI] Title already in message, not injecting")
             except Exception as e:
-                print(f"[WARN] Could not get book title: {e}")
+                print(f"[WARN] Could not get document title: {e}")
         else:
-            print("[UI] No book selected from dropdown")
+            print("[UI] No document selected from dropdown")
 
         # Convert Gradio history to OpenAI format
         conversation_history = []
@@ -168,9 +170,12 @@ class BookMateUI:
 
 def create_app():
     """Create the main Gradio application."""
-    from src.ui.utils import get_available_books, format_book_list
+    from src.ui.utils import get_available_documents, format_document_list
 
-    ui = BookMateUI()
+    # Preload retriever in background to avoid delay on first query
+    threading.Thread(target=preload_retriever, daemon=True).start()
+
+    ui = DocMateUI()
 
     with gr.Blocks(title="Doc Mate", theme=gr.themes.Base()) as app:
         gr.Markdown("# Doc Mate - AI Document Assistant")
@@ -178,50 +183,50 @@ def create_app():
         with gr.Tabs() as tabs:
             # Tab 1: Chat Interface
             with gr.Tab("Chat", id=0):
-                dropdown, book_list, load_book_list = create_chat_interface(ui)
+                dropdown, doc_list, load_doc_list = create_chat_interface(ui)
 
             # Tab 2: Add New Document
             with gr.Tab("Add Document", id=1):
-                ingest_book_list = create_ingest_interface()
+                ingest_doc_list = create_ingest_interface()
 
             # Tab 3: Monitoring
             with gr.Tab("Monitoring", id=2):
                 create_monitoring_interface()
 
-        # Auto-refresh book lists when switching tabs
+        # Auto-refresh document lists when switching tabs
         def refresh_on_tab_change(evt: gr.SelectData):
             # Always fetch fresh data from database (source of truth)
-            books = get_available_books()
-            new_list = format_book_list(books)
+            docs = get_available_documents()
+            new_list = format_document_list(docs)
             # Show only titles in dropdown, not slugs
             new_choices = [("Select a doc...", "none")] + [
-                (f"{title}", slug) for slug, title, _, _, _ in books
+                (f"{title}", slug) for slug, title, _, _, _ in docs
             ]
 
             print(
-                f"[DEBUG] Tab switched to: {evt.value}, refreshing with {len(books)} books"
+                f"[DEBUG] Tab switched to: {evt.value}, refreshing with {len(docs)} documents"
             )
 
             if evt.value == 0 or evt.index == 0:
-                # Switching to Chat tab - refresh chat book list and dropdown
+                # Switching to Chat tab - refresh chat document list and dropdown
                 return new_list, gr.update(choices=new_choices), gr.update()
             elif evt.value == 1 or evt.index == 1:
-                # Switching to Add Book tab - refresh ingest book list
+                # Switching to Add Document tab - refresh ingest document list
                 return gr.update(), gr.update(), new_list
 
             # Refresh both to be safe
             return new_list, gr.update(choices=new_choices), new_list
 
         tabs.select(
-            refresh_on_tab_change, None, [book_list, dropdown, ingest_book_list]
+            refresh_on_tab_change, None, [doc_list, dropdown, ingest_doc_list]
         )
 
-        # Load book lists on startup
+        # Load document lists on startup
         def load_ingest_list():
-            return format_book_list(get_available_books())
+            return format_document_list(get_available_documents())
 
-        app.load(load_book_list, None, book_list)
-        app.load(load_ingest_list, None, ingest_book_list)
+        app.load(load_doc_list, None, doc_list)
+        app.load(load_ingest_list, None, ingest_doc_list)
 
     return app
 

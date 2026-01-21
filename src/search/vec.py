@@ -27,7 +27,11 @@ class SemanticRetriever:
         # Load embedder with retry logic for HuggingFace connection issues
         for attempt in range(max_retries):
             try:
-                self.embedder = SentenceTransformer(transformer)
+                logger.info(f"Loading SentenceTransformer model '{transformer}' (attempt {attempt + 1})...")
+                start_time = time.time()
+                # Force CPU to avoid GPU detection hangs in Docker
+                self.embedder = SentenceTransformer(transformer, device="cpu")
+                logger.info(f"Model loaded in {time.time() - start_time:.2f}s")
                 break
             except Exception as e:
                 if attempt < max_retries - 1:
@@ -81,25 +85,25 @@ class SemanticRetriever:
         )
         logger.info("Inserted %d chunks into Qdrant", len(chunks))
 
-    def search(self, query, topk=7, book_slug=None):
+    def search(self, query, topk=7, doc_slug=None):
         if not self.qdrant.collection_exists(SemanticRetriever.COLLECTION):
             logger.warning(
                 "Collection '%s' does not exist in Qdrant", SemanticRetriever.COLLECTION
             )
             return []
 
-        logger.info("Qdrant search: query='%s', topk=%d, book_slug=%s", query, topk, book_slug)
+        logger.info("Qdrant search: query='%s', topk=%d, doc_slug=%s", query, topk, doc_slug)
         vec = self.embedder.encode([query], normalize_embeddings=True)[0].tolist()
 
-        # Build query filter if book_slug is provided
+        # Build query filter if doc_slug is provided
         query_filter = None
-        if book_slug:
+        if doc_slug:
             from qdrant_client.models import Filter, FieldCondition, MatchText
             query_filter = Filter(
                 must=[
                     FieldCondition(
                         key="id",
-                        match=MatchText(text=book_slug)
+                        match=MatchText(text=doc_slug)
                     )
                 ]
             )
@@ -155,6 +159,35 @@ class SemanticRetriever:
                 logger.warning("Could not retrieve chunk %s: %s", chunk_id, e)
                 results.append({"id": chunk_id, "text": "[Text not found]", "metadata": {}})
         return results
+
+    def get_all_chunks(self, batch_size=100):
+        """
+        Yield all chunks from the Qdrant collection using scrolling.
+        """
+        if not self.qdrant.collection_exists(SemanticRetriever.COLLECTION):
+            return
+
+        offset = None
+        while True:
+            # Scroll through points
+            points, next_offset = self.qdrant.scroll(
+                collection_name=SemanticRetriever.COLLECTION,
+                limit=batch_size,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            for point in points:
+                yield {
+                    "id": point.payload.get("id"),
+                    "text": point.payload.get("text"),
+                    "metadata": point.payload.get("metadata", {})
+                }
+            
+            if next_offset is None:
+                break
+            offset = next_offset
 
     def cleanup(self):
         self.embeddings = []

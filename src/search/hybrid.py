@@ -13,21 +13,20 @@ class FusionRetriever:
         self,
         transformer="BAAI/bge-small-en",
         alpha=0.7,
-        bm25_index_path="INDEXES/bm25_index.pkl",
+        bm25_index_path=None, # Deprecated
     ) -> None:
         self.bm25 = BM25Retriever()
         self.vec = SemanticRetriever(transformer=transformer)
         self.alpha = alpha
-        self.bm25_index_path = bm25_index_path
 
     def build_index(self, chunks):
         self.bm25.build_index(chunks)
-        self.bm25.save_index(self.bm25_index_path)
+        # BM25Retriever.build_index now handles storage in DB
         self.vec.build_index(chunks)
 
     def load_bm25_index(self):
-        """Load BM25 index from disk."""
-        self.bm25.load_index(self.bm25_index_path)
+        """Deprecated."""
+        pass
 
     @staticmethod
     def rrf_fusion(bm25_results, embed_results, k=7, c=60):
@@ -59,33 +58,26 @@ class FusionRetriever:
             scores[c["id"]] += (1 - self.alpha) * (1.0 / rank)
         return [cid for cid, _ in sorted(scores.items(), key=lambda x: -x[1])[:topk]]
 
-    def id_search(self, query: str, topk=7, use_bm25=True, book_slug=None):
+    def id_search(self, query: str, topk=7, use_bm25=True, doc_slug=None):
         """
-        Hybrid search with automatic BM25 index loading.
+        Hybrid search using database-backed BM25 and Vector search.
 
         Args:
             query: Search query
             topk: Number of results to return
-            use_bm25: If True, load and use BM25 index. If False, vector-only search.
-            book_slug: If provided, only search within this book (e.g., 'aiw', 'gtr')
+            use_bm25: If True, use BM25 index. If False, vector-only search.
+            doc_slug: If provided, only search within this document (e.g., 'aiw', 'gtr')
         """
-        if use_bm25 and self.bm25.N == 0:
-            try:
-                self.load_bm25_index()
-            except FileNotFoundError:
-                logger.warning("BM25 index not found, using vector-only search")
-                use_bm25 = False
+        logger.info("Hybrid search: mode=%s, topk=%d, doc_slug=%s",
+                   "BM25+Vector" if use_bm25 else "Vector-only", topk, doc_slug)
 
-        logger.info("Hybrid search: mode=%s, topk=%d, book_slug=%s",
-                   "BM25+Vector" if use_bm25 else "Vector-only", topk, book_slug)
-
-        embed_results = self.vec.search(query, topk * 2, book_slug=book_slug)
+        embed_results = self.vec.search(query, topk * 2, doc_slug=doc_slug)
 
         if not use_bm25:
             logger.info("Vector-only search completed: %d results", len(embed_results[:topk]))
             return [c["id"] for c in embed_results[:topk]]
 
-        bm25_results = self.bm25.search(query, topk * 2, book_slug=book_slug)
+        bm25_results = self.bm25.search(query, topk * 2, doc_slug=doc_slug)
         fused = self.weighted_fusion(bm25_results, embed_results, topk)
         logger.info("Hybrid fusion completed: %d BM25 + %d Vector -> %d fused results",
                    len(bm25_results), len(embed_results), len(fused))

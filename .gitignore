@@ -211,8 +211,12 @@ __marimo__/
 pgdata
 qdrant_data
 indexes/
+hf_cache/
+.gemini
 
 # Architecture and implementation documentation
 docs/*.md
 notebooks/*.md
 TEST*.md
+
+

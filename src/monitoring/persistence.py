@@ -20,7 +20,7 @@ class MetricsPersistence:
             cur.execute(
                 """
                 INSERT INTO query_metrics (
-                    query_id, timestamp, query, response, book_slug,
+                    query_id, timestamp, query, response, doc_slug,
                     latency_ms, success, error_message, tool_calls, num_results,
                     llm_relevance_score, llm_reasoning, user_rating, user_comment,
                     retry_attempted, original_query, rephrased_query, retry_results, fallback_to_context
@@ -35,7 +35,7 @@ class MetricsPersistence:
                     metric.timestamp,
                     metric.query,
                     metric.response,
-                    metric.book_slug,
+                    metric.doc_slug,
                     metric.latency_ms,
                     metric.success,
                     metric.error_message,
@@ -80,7 +80,7 @@ class MetricsPersistence:
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT query_id, timestamp, query, response, book_slug,
+                SELECT query_id, timestamp, query, response, doc_slug,
                        latency_ms, success, error_message, tool_calls, num_results,
                        llm_relevance_score, llm_reasoning, user_rating, user_comment,
                        retry_attempted, original_query, rephrased_query, retry_results, fallback_to_context
@@ -106,7 +106,7 @@ class MetricsPersistence:
                 timestamp=row[1],
                 query=row[2],
                 response=row[3] or "",
-                book_slug=row[4],
+                doc_slug=row[4],
                 latency_ms=row[5],
                 success=row[6],
                 error_message=row[7],

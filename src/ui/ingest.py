@@ -6,13 +6,13 @@ Backward compatible with document ingestion.
 
 import gradio as gr
 from pathlib import Path
-from src.flows.book_ingest import ingest_document
+from src.flows.document_ingest import ingest_document
 from src.ui.utils import (
     validate_slug,
     extract_chapter_info_from_chunks,
-    format_book_list,
-    get_available_books,
-    delete_book,
+    format_document_list,
+    get_available_documents,
+    delete_document,
 )
 from src.ui.pattern_builder import build_pattern_from_example, validate_pattern_on_file
 
@@ -57,7 +57,7 @@ def test_chapter_pattern(file, chapter_example: str):
         return f"Error testing pattern: {str(e)}"
 
 
-async def ingest_new_book(
+async def ingest_new_document(
     file,
     title: str,
     author: str,
@@ -165,37 +165,37 @@ async def ingest_new_book(
         output += f"\n[SUCCESS] {doc_type.title()} ingested:\n"
         output += f"- Slug: {result['slug']}\n"
         output += f"- Title: {result['title']}\n"
-        output += f"- Chapters: {result['chapters']}\n"
+        output += f"- Sections: {result['chapters']}\n"
         output += f"- Chunks: {result['chunks']}\n"
         output += f"- Search indexed: {result['search_indexed']}\n\n"
 
-        # Analyze chunks to verify chapter detection
+        # Analyze chunks to verify structure detection
         output += "Analyzing indexed chunks...\n"
         chunk_info = extract_chapter_info_from_chunks(slug)
 
-        chapter_detail = ""
+        structure_detail = ""
         if chunk_info["status"] == "success":
-            output += f"- Total chapters detected: {chunk_info['total_chapters']}\n"
+            output += f"- Total sections detected: {chunk_info['total_sections']}\n"
             output += f"- Total chunks indexed: {chunk_info['total_chunks']}\n"
-            output += f"- Chapter range: {chunk_info['chapter_range']}\n"
+            output += f"- Section range: {chunk_info['section_range']}\n"
             output += f"- First chunk ID: {chunk_info['first_chunk']}\n"
             output += f"- Last chunk ID: {chunk_info['last_chunk']}\n\n"
 
-            if chunk_info["total_chapters"] == result["chapters"]:
-                output += "[OK] Chapter count matches! Ingestion successful."
-                chapter_detail = f"Chapters: {', '.join(chunk_info['chapters'])}"
+            if chunk_info["total_sections"] == result["chapters"]:
+                output += "[OK] Section count matches! Ingestion successful."
+                structure_detail = f"Sections: {', '.join(chunk_info['sections'])}"
             else:
-                output += "[WARNING] Chapter count mismatch!\n"
-                output += f"Expected: {result['chapters']}, Found in index: {chunk_info['total_chapters']}"
-                chapter_detail = f"Mismatch: {chunk_info['total_chapters']} chapters"
+                output += "[WARNING] Section count mismatch!\n"
+                output += f"Expected: {result['chapters']}, Found in index: {chunk_info['total_sections']}"
+                structure_detail = f"Mismatch: {chunk_info['total_sections']} sections"
         else:
             output += f"[ERROR] Error analyzing chunks: {chunk_info['message']}"
-            chapter_detail = "Analysis failed"
+            structure_detail = "Analysis failed"
 
         return {
             "output": output,
-            "status": f"[COMPLETE] Ingestion Complete ({result['chapters']} chapters, {result['chunks']} chunks)",
-            "chapter_detail": chapter_detail,
+            "status": f"[COMPLETE] Ingestion Complete ({result['chapters']} sections, {result['chunks']} chunks)",
+            "chapter_detail": structure_detail,
             "clear_inputs": True,
         }
 
@@ -246,15 +246,15 @@ def create_ingest_interface():
                 )
 
                 skip_chapters_check = gr.Checkbox(
-                    label="Skip chapter detection (use auto-chunking)",
+                    label="Skip section detection (use auto-chunking)",
                     value=False,
                     info="Enable if document has no clear chapters or complex structure",
                 )
 
                 chapter_example_input = gr.Textbox(
-                    label="Chapter Pattern Example",
+                    label="Section/Chapter Pattern Example",
                     placeholder="e.g., CHAPTER I. or II. or BOOK II",
-                    info="Enter any chapter heading from your document, then test pattern. Examples: 'CHAPTER I.', 'BOOK II', 'II.'",
+                    info="Enter any section heading from your document, then test pattern. Examples: 'CHAPTER I.', 'BOOK II', 'II.'",
                     lines=1,
                     visible=True,
                 )
@@ -293,7 +293,7 @@ def create_ingest_interface():
                     show_label=False,
                 )
 
-                book_list_display = gr.Dataframe(
+                doc_list_display = gr.Dataframe(
                     headers=["Slug", "Title", "Author", "Chunks", "Added"],
                     datatype=["str", "str", "str", "number", "str"],
                     interactive=False,
@@ -325,8 +325,8 @@ def create_ingest_interface():
 
         ingest_output = gr.Textbox(label="Ingestion Log", lines=12, interactive=False)
 
-        chapter_info = gr.Textbox(
-            label="Chapter Verification", lines=2, interactive=False
+        structure_info = gr.Textbox(
+            label="Structure Verification", lines=2, interactive=False
         )
 
         # Event handlers
@@ -380,12 +380,12 @@ def create_ingest_interface():
         async def handle_ingest(
             doc_type, file, title, author, slug, skip_chap, chapter_ex, force
         ):
-            result = await ingest_new_book(
+            result = await ingest_new_document(
                 file, title, author, slug, skip_chap, chapter_ex, force, doc_type
             )
 
             # Refresh library list with timestamp
-            new_list = format_book_list(get_available_books())
+            new_list = format_document_list(get_available_documents())
             new_timestamp = (
                 f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
@@ -435,19 +435,19 @@ def create_ingest_interface():
             [
                 ingest_output,
                 status_display,
-                chapter_info,
+                structure_info,
                 file_upload,
                 title_input,
                 author_input,
                 slug_input,
                 chapter_example_input,
                 pattern_test_output,
-                book_list_display,
+                doc_list_display,
                 library_timestamp,
             ],
         )
 
-        # Delete book handler with confirmation state
+        # Delete document handler with confirmation state
         delete_pending_slug = gr.State(None)
 
         def request_delete_confirmation(slug):
@@ -461,22 +461,22 @@ def create_ingest_interface():
                     gr.update(visible=False),  # Hide confirm button
                 )
 
-            # Get book info
-            books = get_available_books()
-            book_info = next((b for b in books if b[0] == slug), None)
+            # Get document info
+            docs = get_available_documents()
+            doc_info = next((d for d in docs if d[0] == slug), None)
 
-            if not book_info:
+            if not doc_info:
                 return (
                     f"[ERROR] Document '{slug}' not found",
                     None,
                     gr.update(visible=False),
                 )
 
-            book_slug, book_title, book_author, num_chunks, _ = book_info
-            author_str = f" by {book_author}" if book_author else ""
+            doc_slug, doc_title, doc_author, num_chunks, _ = doc_info
+            author_str = f" by {doc_author}" if doc_author else ""
 
             confirm_msg = (
-                f"[CONFIRM?] Delete '{book_title}'{author_str}? ({num_chunks} chunks)\n"
+                f"[CONFIRM?] Delete '{doc_title}'{author_str}? ({num_chunks} chunks)\n"
             )
             confirm_msg += "This action cannot be undone.\n\n"
             confirm_msg += "Click 'Confirm Delete' button below to proceed."
@@ -500,10 +500,10 @@ def create_ingest_interface():
                 )
 
             output = f"Deleting document '{pending_slug}'...\n\n"
-            success, message, chunks_deleted = delete_book(pending_slug)
+            success, message, chunks_deleted = delete_document(pending_slug)
 
-            # Always refresh book list after deletion attempt
-            new_list = format_book_list(get_available_books())
+            # Always refresh document list after deletion attempt
+            new_list = format_document_list(get_available_documents())
             new_timestamp = (
                 f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
@@ -528,7 +528,7 @@ def create_ingest_interface():
             [delete_pending_slug],
             [
                 delete_output,
-                book_list_display,
+                doc_list_display,
                 library_timestamp,
                 delete_slug_input,
                 delete_pending_slug,
@@ -536,4 +536,4 @@ def create_ingest_interface():
             ],
         )
 
-    return book_list_display
+    return doc_list_display

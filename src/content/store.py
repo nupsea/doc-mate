@@ -21,63 +21,63 @@ class PgresStore:
     def __init__(self, conn=None) -> None:
         self.conn = conn or psycopg2.connect(**DB_CONFIG)
 
-    def _resolve_book_id(self, book_identifier: int | str) -> int | None:
+    def _resolve_doc_id(self, doc_identifier: int | str) -> int | None:
         """
-        Resolve book_id from either:
-        - book_id (int): returns as-is
-        - slug (str): looks up book_id from books table
+        Resolve doc_id from either:
+        - doc_id (int): returns as-is
+        - slug (str): looks up doc_id from documents table
         - title (str): fallback to case-insensitive title match
         Returns None if not found.
         """
-        if isinstance(book_identifier, int):
-            return book_identifier
+        if isinstance(doc_identifier, int):
+            return doc_identifier
 
         # Try exact slug match first
         with self.conn.cursor() as cur:
-            cur.execute("SELECT book_id FROM books WHERE slug = %s", (book_identifier,))
+            cur.execute("SELECT doc_id FROM documents WHERE slug = %s", (doc_identifier,))
             row = cur.fetchone()
             if row:
                 return row[0]
 
             # Fallback: try case-insensitive title match
-            cur.execute("SELECT book_id FROM books WHERE LOWER(title) = LOWER(%s)", (book_identifier,))
+            cur.execute("SELECT doc_id FROM documents WHERE LOWER(title) = LOWER(%s)", (doc_identifier,))
             row = cur.fetchone()
             return row[0] if row else None
 
-    def book_exists(self, slug: str) -> bool:
-        """Check if a book with given slug exists."""
+    def document_exists(self, slug: str) -> bool:
+        """Check if a document with given slug exists."""
         with self.conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM books WHERE slug = %s", (slug,))
+            cur.execute("SELECT 1 FROM documents WHERE slug = %s", (slug,))
             return cur.fetchone() is not None
 
-    def summaries_exist(self, book_identifier: int | str) -> bool:
-        """Check if summaries exist for a book."""
-        book_id = self._resolve_book_id(book_identifier)
-        if not book_id:
+    def summaries_exist(self, doc_identifier: int | str) -> bool:
+        """Check if summaries exist for a document."""
+        doc_id = self._resolve_doc_id(doc_identifier)
+        if not doc_id:
             return False
 
         with self.conn.cursor() as cur:
-            # Check if book summary exists
-            cur.execute("SELECT 1 FROM book_summaries WHERE book_id = %s", (book_id,))
+            # Check if document summary exists
+            cur.execute("SELECT 1 FROM document_summaries WHERE doc_id = %s", (doc_id,))
             return cur.fetchone() is not None
 
-    def delete_book(self, book_identifier: int | str) -> bool:
+    def delete_document(self, doc_identifier: int | str) -> bool:
         """
-        Delete a book and all related data (summaries).
-        Foreign key CASCADE will automatically delete chapter_summaries and book_summaries.
-        Returns True if book was deleted, False if not found.
+        Delete a document and all related data (summaries).
+        Foreign key CASCADE will automatically delete chapter_summaries and document_summaries.
+        Returns True if document was deleted, False if not found.
         """
-        book_id = self._resolve_book_id(book_identifier)
-        if not book_id:
+        doc_id = self._resolve_doc_id(doc_identifier)
+        if not doc_id:
             return False
 
         with self.conn.cursor() as cur:
-            cur.execute("DELETE FROM books WHERE book_id = %s", (book_id,))
+            cur.execute("DELETE FROM documents WHERE doc_id = %s", (doc_id,))
             deleted = cur.rowcount > 0
         self.conn.commit()
         return deleted
 
-    def store_book_metadata(
+    def store_document_metadata(
         self,
         slug: str,
         title: str,
@@ -86,7 +86,7 @@ class PgresStore:
         num_chars: int = None,
     ) -> int:
         """
-        Insert or update book metadata. Returns book_id.
+        Insert or update document metadata. Returns doc_id.
 
         DEPRECATED: Use store_document() instead for multi-format support.
         Kept for backward compatibility.
@@ -139,17 +139,7 @@ class PgresStore:
             metadata: Type-specific metadata (stored as JSONB)
 
         Returns:
-            book_id (document ID)
-
-        Examples:
-            # Store a book
-            store.store_document('my-book', 'My Book', 'book', author='John Doe')
-
-            # Store a script with metadata
-            store.store_document(
-                'matrix', 'The Matrix', 'script',
-                metadata={'num_scenes': 150, 'runtime_minutes': 136}
-            )
+            doc_id (document ID)
         """
         # Sanitize metadata to remove null bytes
         clean_metadata = self._sanitize_metadata(metadata)
@@ -157,7 +147,7 @@ class PgresStore:
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO books (slug, title, author, num_chunks, num_chars, doc_type, metadata)
+                INSERT INTO documents (slug, title, author, num_chunks, num_chars, doc_type, metadata)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (slug) DO UPDATE
                 SET title = excluded.title,
@@ -166,60 +156,60 @@ class PgresStore:
                     num_chars = excluded.num_chars,
                     doc_type = excluded.doc_type,
                     metadata = excluded.metadata
-                RETURNING book_id
+                RETURNING doc_id
                 """,
                 (slug, title, author, num_chunks, num_chars, doc_type,
                  json.dumps(clean_metadata)),
             )
-            book_id = cur.fetchone()[0]
+            doc_id = cur.fetchone()[0]
         self.conn.commit()
-        return book_id
+        return doc_id
 
     def store_summaries(
-        self, book_identifier: int | str, chapter_summaries: list, book_summary: str
+        self, doc_identifier: int | str, chapter_summaries: list, document_summary: str
     ):
         """
-        Store chapter and book summaries.
-        book_identifier can be either book_id (int) or slug (str).
+        Store chapter and document summaries.
+        doc_identifier can be either doc_id (int) or slug (str).
         """
-        book_id = self._resolve_book_id(book_identifier)
-        if not book_id:
-            raise ValueError(f"Book not found: {book_identifier}")
+        doc_id = self._resolve_doc_id(doc_identifier)
+        if not doc_id:
+            raise ValueError(f"Document not found: {doc_identifier}")
 
         with self.conn.cursor() as cur:
             # Insert chapters
-            rows = [(book_id, c["chapter_id"], c["summary"]) for c in chapter_summaries]
+            rows = [(doc_id, c["chapter_id"], c["summary"]) for c in chapter_summaries]
             execute_values(
                 cur,
                 """
-                INSERT INTO chapter_summaries (book_id, chapter_id, summary)
+                INSERT INTO chapter_summaries (doc_id, chapter_id, summary)
                 VALUES %s
-                ON CONFLICT (book_id, chapter_id) DO UPDATE SET summary = excluded.summary
+                ON CONFLICT (doc_id, chapter_id) DO UPDATE SET summary = excluded.summary
             """,
                 rows,
             )
 
-            # Insert book summary
+            # Insert document summary
             cur.execute(
                 """
-                INSERT INTO book_summaries (book_id, summary)
+                INSERT INTO document_summaries (doc_id, summary)
                 VALUES (%s, %s)
-                ON CONFLICT (book_id) DO UPDATE SET summary = excluded.summary
+                ON CONFLICT (doc_id) DO UPDATE SET summary = excluded.summary
             """,
-                (book_id, book_summary),
+                (doc_id, document_summary),
             )
 
         self.conn.commit()
 
     def get_chapter_summary(
-        self, book_identifier: int | str, chapter_id: int
+        self, doc_identifier: int | str, chapter_id: int
     ) -> str | None:
         """
         Fetch one chapter summary from DB.
-        book_identifier can be either book_id (int) or slug (str).
+        doc_identifier can be either doc_id (int) or slug (str).
         """
-        book_id = self._resolve_book_id(book_identifier)
-        if not book_id:
+        doc_id = self._resolve_doc_id(doc_identifier)
+        if not doc_id:
             return None
 
         with self.conn.cursor() as cur:
@@ -227,22 +217,22 @@ class PgresStore:
                 """
                 SELECT summary
                 FROM chapter_summaries
-                WHERE book_id = %s AND chapter_id = %s
+                WHERE doc_id = %s AND chapter_id = %s
                 """,
-                (book_id, chapter_id),
+                (doc_id, chapter_id),
             )
             row = cur.fetchone()
         return row[0] if row else None
 
     def get_all_chapter_summaries(
-        self, book_identifier: int | str
+        self, doc_identifier: int | str
     ) -> list[tuple[int, str]]:
         """
-        Fetch all chapter summaries for a book, ordered by chapter_id.
-        book_identifier can be either book_id (int) or slug (str).
+        Fetch all chapter summaries for a document, ordered by chapter_id.
+        doc_identifier can be either doc_id (int) or slug (str).
         """
-        book_id = self._resolve_book_id(book_identifier)
-        if not book_id:
+        doc_id = self._resolve_doc_id(doc_identifier)
+        if not doc_id:
             return []
 
         with self.conn.cursor() as cur:
@@ -250,31 +240,126 @@ class PgresStore:
                 """
                 SELECT chapter_id, summary
                 FROM chapter_summaries
-                WHERE book_id = %s
+                WHERE doc_id = %s
                 ORDER BY chapter_id
                 """,
-                (book_id,),
+                (doc_id,),
             )
             rows = cur.fetchall()
         return rows
 
-    def get_book_summary(self, book_identifier: int | str) -> str | None:
+    def get_document_summary(self, doc_identifier: int | str) -> str | None:
         """
-        Fetch the overall book summary.
-        book_identifier can be either book_id (int) or slug (str).
+        Fetch the overall document summary.
+        doc_identifier can be either doc_id (int) or slug (str).
         """
-        book_id = self._resolve_book_id(book_identifier)
-        if not book_id:
+        doc_id = self._resolve_doc_id(doc_identifier)
+        if not doc_id:
             return None
 
         with self.conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT summary
-                FROM book_summaries
-                WHERE book_id = %s
+                FROM document_summaries
+                WHERE doc_id = %s
                 """,
-                (book_id,),
+                (doc_id,),
             )
             row = cur.fetchone()
         return row[0] if row else None
+
+    def store_bm25_index(self, term_freqs: list[tuple[str, str, int]], doc_lens: list[tuple[str, int]]):
+        """
+        Store BM25 term frequencies and document lengths in bulk.
+        term_freqs: list of (term, chunk_id, frequency)
+        doc_lens: list of (chunk_id, doc_len)
+        """
+        with self.conn.cursor() as cur:
+            # Store term frequencies
+            execute_values(
+                cur,
+                """
+                INSERT INTO bm25_index (term, chunk_id, frequency)
+                VALUES %s
+                ON CONFLICT (term, chunk_id) DO UPDATE SET frequency = excluded.frequency
+                """,
+                term_freqs,
+            )
+
+            # Store document lengths
+            execute_values(
+                cur,
+                """
+                INSERT INTO bm25_doc_lens (chunk_id, doc_len)
+                VALUES %s
+                ON CONFLICT (chunk_id) DO UPDATE SET doc_len = excluded.doc_len
+                """,
+                doc_lens,
+            )
+        self.conn.commit()
+
+    def get_bm25_stats(self, terms: list[str], doc_slug: str = None):
+        """
+        Retrieve statistics needed for BM25 scoring.
+        Returns:
+            - df: {term: doc_frequency}
+            - tf: {chunk_id: {term: frequency}}
+            - doc_lens: {chunk_id: length}
+            - N: total number of documents
+        """
+        with self.conn.cursor() as cur:
+            # 1. Total document count (N)
+            if doc_slug:
+                cur.execute("SELECT COUNT(*) FROM bm25_doc_lens WHERE chunk_id LIKE %s", (f"{doc_slug}_%",))
+            else:
+                cur.execute("SELECT COUNT(*) FROM bm25_doc_lens")
+            N = cur.fetchone()[0]
+
+            # 2. Document frequencies (df) for the requested terms
+            df = {}
+            if terms:
+                if doc_slug:
+                    cur.execute(
+                        "SELECT term, COUNT(chunk_id) FROM bm25_index WHERE term = ANY(%s) AND chunk_id LIKE %s GROUP BY term",
+                        (terms, f"{doc_slug}_%"),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT term, COUNT(chunk_id) FROM bm25_index WHERE term = ANY(%s) GROUP BY term",
+                        (terms,),
+                    )
+                df = {row[0]: row[1] for row in cur.fetchall()}
+
+            # 3. Term frequencies (tf) and Document lengths (doc_lens)
+            tf = {}
+            doc_lens = {}
+            if terms:
+                if doc_slug:
+                    cur.execute(
+                        """
+                        SELECT bi.chunk_id, bi.term, bi.frequency, dl.doc_len 
+                        FROM bm25_index bi
+                        JOIN bm25_doc_lens dl ON bi.chunk_id = dl.chunk_id
+                        WHERE bi.term = ANY(%s) AND bi.chunk_id LIKE %s
+                        """,
+                        (terms, f"{doc_slug}_%"),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT bi.chunk_id, bi.term, bi.frequency, dl.doc_len 
+                        FROM bm25_index bi
+                        JOIN bm25_doc_lens dl ON bi.chunk_id = dl.chunk_id
+                        WHERE bi.term = ANY(%s)
+                        """,
+                        (terms,),
+                    )
+                
+                for chunk_id, term, frequency, doc_len in cur.fetchall():
+                    if chunk_id not in tf:
+                        tf[chunk_id] = {}
+                    tf[chunk_id][term] = frequency
+                    doc_lens[chunk_id] = doc_len
+
+        return {"df": df, "tf": tf, "doc_lens": doc_lens, "N": N}
