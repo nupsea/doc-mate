@@ -120,7 +120,7 @@ class AdaptiveRetriever(FusionRetriever):
         use_preprocessing: bool = True,
         use_dynamic_alpha: bool = False,
         candidate_multiplier: int = 3,
-        book_slug: str = None,
+        doc_slug: str = None,
     ):
         """
         Adaptive search with query preprocessing.
@@ -134,7 +134,7 @@ class AdaptiveRetriever(FusionRetriever):
             use_preprocessing: Whether to preprocess query (recommended: True)
             use_dynamic_alpha: Whether to use dynamic alpha (recommended: False, use fixed α=0.7)
             candidate_multiplier: Retrieve topk * multiplier candidates before fusion
-            book_slug: If provided, only search within this book (e.g., 'aiw', 'gtr')
+            doc_slug: If provided, only search within this document (e.g., 'aiw', 'gtr')
 
         Returns:
             List of chunk IDs
@@ -151,21 +151,15 @@ class AdaptiveRetriever(FusionRetriever):
         else:
             processed_query = query
 
-        # Load BM25 index if needed
-        if self.bm25.N == 0:
-            try:
-                self.load_bm25_index()
-            except FileNotFoundError:
-                logger.warning("BM25 index not found, using vector-only search")
-                embed_results = self.vec.search(query, topk, book_slug=book_slug)
-                return [c["id"] for c in embed_results]
-
+        # Load BM25 index if needed (Deprecated logic but kept for safety if someone calls save/load manually)
+        # In the new DB-backed world, self.bm25.N might be 0 until we fetch stats, but that's handled in search()
+        
         # Retrieve more candidates for better fusion
         candidate_count = topk * candidate_multiplier
 
-        # Get results from both systems with book filtering
-        embed_results = self.vec.search(query, candidate_count, book_slug=book_slug)
-        bm25_results = self.bm25.search(processed_query, candidate_count, book_slug=book_slug)
+        # Get results from both systems with document filtering
+        embed_results = self.vec.search(query, candidate_count, doc_slug=doc_slug)
+        bm25_results = self.bm25.search(processed_query, candidate_count, doc_slug=doc_slug)
 
         # Apply weighted fusion with dynamic alpha
         scores = {}

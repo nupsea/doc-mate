@@ -21,9 +21,9 @@ core:
 
   tool_selection: |
     TOOL SELECTION:
-    - Compare/contrast multiple documents? → Use search_multiple_books with ALL slugs in ONE call
-    - Single author with multiple works? → Use search_multiple_books with ALL their slugs
-    - Single document query? → Use search_book
+    - Compare/contrast? → Use search_multiple_documents with ALL slugs in ONE call
+    - Multiple documents? → Use search_multiple_documents
+    - Single document? → Use search_document
 
   slug_finding: |
     FINDING SLUGS:
@@ -91,8 +91,8 @@ simple:
     - If something is not stated, say "The document does not specify" instead of inferring.
 
     TOOLS:
-    - Multiple documents: search_multiple_books with ALL slugs
-    - Single document: search_book with one slug
+    - Multiple documents: search_multiple_documents with ALL slugs
+    - Single document: search_document with one slug
 
     DOCUMENT SLUGS:
     {available_documents}

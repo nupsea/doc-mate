@@ -1,9 +1,8 @@
 import math
 import re
-import pickle
 import logging
-from pathlib import Path
 from collections import Counter
+from src.content.store import PgresStore
 
 logger = logging.getLogger(__name__)
 
@@ -18,125 +17,94 @@ class BM25Retriever:
     def __init__(self, k1=1.5, b=0.75):
         self.k1 = k1
         self.b = b
-        self.docs = []
-        self.doc_lens = []
-        self.avgdl = 0
-        self.df = {}
-        self.idf = {}
-        self.N = 0
-        self.ids = []
-        self.raw_docs = []
+        self.store = PgresStore()
 
     def build_index(self, chunks):
-        self.docs = []
-        self.ids = []
-        self.df = {}
-        self.raw_docs = []
+        """
+        Build BM25 index from chunks and store in DB.
+        """
+        term_freqs = []
+        doc_lens = []
 
         for chunk in chunks:
+            chunk_id = chunk["id"]
             tokens = simple_tokenize(chunk["text"])
-            self.docs.append(tokens)
-            self.ids.append(chunk["id"])
-            self.raw_docs.append(chunk["text"])
+            doc_len = len(tokens)
+            doc_lens.append((chunk_id, doc_len))
+            
+            # Count term frequencies for this chunk
+            freqs = Counter(tokens)
+            for term, freq in freqs.items():
+                term_freqs.append((term, chunk_id, freq))
 
-        self.N = len(self.docs)
-        self.doc_lens = [len(doc) for doc in self.docs]
-        self.avgdl = sum(self.doc_lens) / self.N if self.N > 0 else 0
+        # Store in DB
+        self.store.store_bm25_index(term_freqs, doc_lens)
+        logger.info(f"Built and stored BM25 index for {len(chunks)} chunks")
 
-        for doc in self.docs:
-            for word in set(doc):
-                self.df[word] = self.df.get(word, 0) + 1
-
-        self.idf = {
-            word: math.log((self.N - freq + 0.5) / (freq + 0.5) + 1)
-            for word, freq in self.df.items()
-        }
-
-    def score(self, query_tokens, idx):
-        doc = self.docs[idx]
-        doc_len = self.doc_lens[idx]
-        freqs = Counter(doc)
+    def score(self, query_tokens, chunk_id, tf, doc_len, df, N, avgdl):
         score = 0.0
         for term in query_tokens:
-            if term not in freqs:
+            if term not in tf.get(chunk_id, {}):
                 continue
-            df = freqs[term]
-            idf = self.idf.get(term, 0)
-            numer = df * (self.k1 + 1)
-            denom = df + self.k1 * (1 - self.b + self.b * doc_len / self.avgdl)
+            
+            term_tf = tf[chunk_id][term]
+            term_df = df.get(term, 0)
+            
+            # Calculate IDF
+            idf = math.log((N - term_df + 0.5) / (term_df + 0.5) + 1)
+            
+            # Calculate BM25 score for this term
+            numer = term_tf * (self.k1 + 1)
+            denom = term_tf + self.k1 * (1 - self.b + self.b * doc_len / avgdl)
             score += idf * (numer / denom)
+            
         return score
 
-    def search(self, query, topk=7, book_slug=None):
+    def search(self, query, topk=7, doc_slug=None):
         query_tokens = simple_tokenize(query)
-        logger.info("BM25 search: query='%s', topk=%d, book_slug=%s", query, topk, book_slug)
+        logger.info("BM25 search: query='%s', topk=%d, doc_slug=%s", query, topk, doc_slug)
 
-        # Filter by book_slug if provided
-        if book_slug:
-            # Only score documents from the specified book
-            valid_indices = [i for i in range(self.N) if self.ids[i].startswith(f"{book_slug}_")]
-            scores = [(i, self.score(query_tokens, i)) for i in valid_indices]
-        else:
-            # Score all documents
-            scores = [(i, self.score(query_tokens, i)) for i in range(self.N)]
+        # 1. Fetch Stats from DB
+        stats = self.store.get_bm25_stats(query_tokens, doc_slug=doc_slug)
+        N = stats["N"]
+        if N == 0:
+            return []
+            
+        df = stats["df"]
+        tf = stats["tf"]
+        doc_lens = stats["doc_lens"]
+        
+        # Calculate avgdl based on fetched docs (approximate but effective)
+        avgdl = sum(doc_lens.values()) / len(doc_lens) if doc_lens else 0
 
+        # 2. Score documents
+        scores = []
+        for chunk_id, length in doc_lens.items():
+            s = self.score(query_tokens, chunk_id, tf, length, df, N, avgdl)
+            if s > 0:
+                scores.append((chunk_id, s))
+
+        # 3. Rank and Format
         ranked = sorted(scores, key=lambda x: -x[1])[:topk]
+        
+        # Return results compatible with old interface
         results = [
-            {"id": self.ids[i], "text": self.raw_docs[i], "score": s} for i, s in ranked
+            {"id": cid, "score": s, "text": "(text fetch required)"} for cid, s in ranked
         ]
+        
         logger.info("BM25 returned %d results", len(results))
         return results
 
-    def id_search(self, query: str, topk=7):
-        search_results = self.search(query, topk)
+    def id_search(self, query: str, topk=7, doc_slug=None):
+        search_results = self.search(query, topk, doc_slug)
         return [c["id"] for c in search_results]
 
+    # Deprecated methods stubs for compatibility
     def save_index(self, filepath: str = "bm25_index.pkl"):
-        """Save BM25 index to disk."""
-        index_data = {
-            "docs": self.docs,
-            "doc_lens": self.doc_lens,
-            "avgdl": self.avgdl,
-            "df": self.df,
-            "idf": self.idf,
-            "N": self.N,
-            "ids": self.ids,
-            "raw_docs": self.raw_docs,
-            "k1": self.k1,
-            "b": self.b,
-        }
-        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-        with open(filepath, "wb") as f:
-            pickle.dump(index_data, f)
-        logger.info(f"BM25 index saved to {filepath}")
+        logger.warning("save_index is deprecated. Index is stored in DB.")
 
     def load_index(self, filepath: str = "bm25_index.pkl"):
-        """Load BM25 index from disk."""
-        if not Path(filepath).exists():
-            raise FileNotFoundError(f"BM25 index not found at {filepath}")
-
-        with open(filepath, "rb") as f:
-            index_data = pickle.load(f)
-
-        self.docs = index_data["docs"]
-        self.doc_lens = index_data["doc_lens"]
-        self.avgdl = index_data["avgdl"]
-        self.df = index_data["df"]
-        self.idf = index_data["idf"]
-        self.N = index_data["N"]
-        self.ids = index_data["ids"]
-        self.raw_docs = index_data["raw_docs"]
-        self.k1 = index_data.get("k1", 1.5)
-        self.b = index_data.get("b", 0.75)
-        logger.info(f"BM25 index loaded from {filepath} ({self.N} documents)")
+        logger.warning("load_index is deprecated. Index is loaded from DB.")
 
     def cleanup(self):
-        self.docs = []
-        self.ids = []
-        self.df = {}
-        self.idf = {}
-        self.doc_lens = []
-        self.avgdl = 0
-        self.N = 0
-        self.raw_docs = []
-        logger.info("BM25 index cleared.")
+        logger.warning("cleanup is deprecated.")

@@ -3,7 +3,6 @@ Chat interface component.
 """
 
 import gradio as gr
-from src.ui.utils import get_available_books, format_book_list
 from src.monitoring.metrics import metrics_collector
 
 
@@ -11,7 +10,7 @@ from src.monitoring.metrics import metrics_collector
 query_id_map = {}
 
 
-async def respond(message, chat_history, selected_book, selected_provider, selected_model, privacy_mode, ui):
+async def respond(message, chat_history, selected_doc, selected_provider, selected_model, privacy_mode, ui):
     """Handle chat interactions."""
     if not message.strip():
         yield chat_history, message, gr.update(visible=False)
@@ -21,8 +20,6 @@ async def respond(message, chat_history, selected_book, selected_provider, selec
     settings_changed, was_ephemeral, is_ephemeral = await ui.set_provider_and_model(selected_provider, selected_model, privacy_mode)
 
     # Clear conversation history ONLY when switching FROM ephemeral TO non-ephemeral
-    # This prevents ephemeral queries from being included in future traces
-    # while preserving context when switching TO ephemeral modes
     if settings_changed and was_ephemeral and not is_ephemeral:
         print("[UI] Switching from ephemeral to non-ephemeral mode - clearing conversation history to preserve privacy")
         chat_history = []
@@ -38,7 +35,7 @@ async def respond(message, chat_history, selected_book, selected_provider, selec
     yield chat_history, message, gr.update(visible=False)
 
     # Get bot response
-    bot_response, query_id = await ui.chat(message, chat_history[:-1], selected_book)
+    bot_response, query_id = await ui.chat(message, chat_history[:-1], selected_doc)
 
     # Update with actual response
     chat_history[-1][1] = bot_response
@@ -93,6 +90,7 @@ def update_model_choices(provider, privacy_mode):
 
 def create_chat_interface(ui):
     """Create the chat tab interface."""
+    from src.ui.utils import get_available_documents, format_document_list
 
     with gr.Column():
         with gr.Row():
@@ -100,14 +98,14 @@ def create_chat_interface(ui):
                 gr.Markdown("### Chat with Docs")
 
                 with gr.Row():
-                    book_dropdown = gr.Dropdown(
+                    doc_dropdown = gr.Dropdown(
                         choices=[("Select a doc...", "none")]
                         + [
                             (f"{title}", slug)
-                            for slug, title, _, _, _ in get_available_books()
+                            for slug, title, _, _, _ in get_available_documents()
                         ],
                         value="none",
-                        label="Select Doc (optional)",
+                        label="Select Document (optional)",
                         info="Auto-injects document title into queries",
                         scale=1,
                     )
@@ -204,7 +202,7 @@ def create_chat_interface(ui):
             with gr.Column(scale=1, min_width=300):
                 gr.Markdown("### Library")
 
-                book_list = gr.Dataframe(
+                doc_list = gr.Dataframe(
                     headers=["Slug", "Title", "Author", "Chunks", "Added"],
                     datatype=["str", "str", "str", "number", "str"],
                     interactive=False,
@@ -214,9 +212,9 @@ def create_chat_interface(ui):
                 )
 
         # Event handlers - wrap to pass ui
-        async def handle_submit(msg_text, history, book_sel, provider_sel, model_sel, privacy):
+        async def handle_submit(msg_text, history, doc_sel, provider_sel, model_sel, privacy):
             async for result_history, result_msg, feedback_update in respond(
-                msg_text, history, book_sel, provider_sel, model_sel, privacy, ui
+                msg_text, history, doc_sel, provider_sel, model_sel, privacy, ui
             ):
                 yield result_history, result_msg, feedback_update
 
@@ -238,12 +236,12 @@ def create_chat_interface(ui):
 
         msg.submit(
             handle_submit,
-            [msg, chatbot, book_dropdown, provider_dropdown, model_dropdown, privacy_mode],
+            [msg, chatbot, doc_dropdown, provider_dropdown, model_dropdown, privacy_mode],
             [chatbot, msg, feedback_row]
         )
         send_btn.click(
             handle_submit,
-            [msg, chatbot, book_dropdown, provider_dropdown, model_dropdown, privacy_mode],
+            [msg, chatbot, doc_dropdown, provider_dropdown, model_dropdown, privacy_mode],
             [chatbot, msg, feedback_row]
         )
         clear_btn.click(
@@ -254,8 +252,8 @@ def create_chat_interface(ui):
             handle_rating, [rating_radio, chatbot], [feedback_status, feedback_row]
         )
 
-        # Load book list on page load
-        def load_book_list():
-            return format_book_list(get_available_books())
+        # Load document list on page load
+        def load_doc_list():
+            return format_document_list(get_available_documents())
 
-    return book_dropdown, book_list, load_book_list
+    return doc_dropdown, doc_list, load_doc_list

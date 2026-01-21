@@ -6,23 +6,26 @@ import re
 from src.content.store import PgresStore
 
 
-def get_available_books():
-    """Fetch list of books from database with slug, title, author, chunks, and added_at."""
+def get_available_documents():
+    """Fetch list of documents from database with slug, title, author, chunks, and added_at."""
     try:
         store = PgresStore()
         with store.conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT slug, title, author, num_chunks, added_at
-                FROM books
+                FROM documents
                 ORDER BY added_at DESC
             """
             )
-            books = cur.fetchall()
-        return books
+            docs = cur.fetchall()
+        return docs
     except Exception as e:
-        print(f"Error fetching books: {e}")
+        print(f"Error fetching documents: {e}")
         return []
+
+# Compatibility alias
+get_available_books = get_available_documents
 
 
 def validate_slug(slug: str) -> tuple[bool, str]:
@@ -52,7 +55,7 @@ def validate_slug(slug: str) -> tuple[bool, str]:
     try:
         store = PgresStore()
         with store.conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM books WHERE slug = %s", (slug,))
+            cur.execute("SELECT COUNT(*) FROM documents WHERE slug = %s", (slug,))
             count = cur.fetchone()[0]
             if count > 0:
                 return False, f"Slug '{slug}' already exists. Choose a different one."
@@ -110,63 +113,62 @@ def detect_chapter_pattern(file_path: str) -> tuple[str, str]:
 
 def extract_chapter_info_from_chunks(slug: str):
     """
-    Analyze chunk IDs to determine chapter count.
+    Analyze chunk IDs to determine section/chapter count.
 
-    Chunk format: slug_chapter_chunk_hash (e.g., mma_01_001_abc123)
+    Chunk format: slug_section_chunk_hash (e.g., mma_01_001_abc123)
 
     Returns:
-        dict with chapter info
+        dict with chapter/section info
     """
     try:
-        from src.search.hybrid import FusionRetriever
+        # In the new DB-backed world, we don't need load_bm25_index
+        # but we need to check if there are any chunks for this slug.
+        
+        # We'll use the store to get chunk IDs for this document
+        store = PgresStore()
+        with store.conn.cursor() as cur:
+            cur.execute("SELECT chunk_id FROM bm25_doc_lens WHERE chunk_id LIKE %s", (f"{slug}_%",))
+            doc_chunks = [row[0] for row in cur.fetchall()]
 
-        retriever = FusionRetriever()
-        # Get all chunk IDs from BM25 index
-        if retriever.bm25.N == 0:
-            retriever.load_bm25_index()
+        if not doc_chunks:
+            return {"status": "error", "message": f"No chunks found for document '{slug}'"}
 
-        # Filter chunks by slug
-        book_chunks = [cid for cid in retriever.bm25.ids if cid.startswith(f"{slug}_")]
-
-        if not book_chunks:
-            return {"status": "error", "message": f"No chunks found for book '{slug}'"}
-
-        # Extract chapter numbers
-        chapter_numbers = set()
-        for chunk_id in book_chunks:
+        # Extract section numbers
+        section_numbers = set()
+        for chunk_id in doc_chunks:
             # chunk_id format: mma_01_001_abc123
             parts = chunk_id.split("_")
             if len(parts) >= 2:
-                chapter_num = parts[1]
-                chapter_numbers.add(chapter_num)
+                section_num = parts[1]
+                section_numbers.add(section_num)
 
-        sorted_chapters = sorted(chapter_numbers)
+        sorted_sections = sorted(section_numbers)
 
         return {
             "status": "success",
-            "total_chunks": len(book_chunks),
-            "total_chapters": len(sorted_chapters),
-            "first_chunk": book_chunks[0] if book_chunks else "N/A",
-            "last_chunk": book_chunks[-1] if book_chunks else "N/A",
-            "chapter_range": (
-                f"{sorted_chapters[0]} to {sorted_chapters[-1]}"
-                if sorted_chapters
+            "total_chunks": len(doc_chunks),
+            "total_sections": len(sorted_sections),
+            "first_chunk": doc_chunks[0] if doc_chunks else "N/A",
+            "last_chunk": doc_chunks[-1] if doc_chunks else "N/A",
+            "section_range": (
+                f"{sorted_sections[0]} to {sorted_sections[-1]}"
+                if sorted_sections
                 else "N/A"
             ),
-            "chapters": sorted_chapters,
+            "sections": sorted_sections,
         }
 
     except Exception as e:
         return {"status": "error", "message": f"Error analyzing chunks: {str(e)}"}
 
 
-def format_book_list(books):
-    """Format book list as a dataframe (list of lists for Gradio Dataframe)."""
-    if not books:
+def format_document_list(docs):
+    """Format document list as a dataframe (list of lists for Gradio Dataframe)."""
+    if not docs:
         return []
 
     data = []
-    for slug, title, author, num_chunks, added_at in books:
+    for slug, title, author, num_chunks, added_at in docs:
         # Format date
         if added_at:
             date_str = added_at.strftime("%Y-%m-%d %H:%M")
@@ -185,12 +187,14 @@ def format_book_list(books):
 
     return data
 
+# Compatibility alias
+format_book_list = format_document_list
 
-def delete_book(slug: str) -> tuple[bool, str, int]:
+
+def delete_document(slug: str) -> tuple[bool, str, int]:
     """
-    Delete a book and all its associated data from:
-    - PostgreSQL (books table - cascades to chapter_summaries and book_summaries)
-    - BM25 index
+    Delete a document and all its associated data from:
+    - PostgreSQL (documents table - cascades to summaries and index)
     - Qdrant vector store
 
     Returns:
@@ -198,56 +202,47 @@ def delete_book(slug: str) -> tuple[bool, str, int]:
     """
     try:
         from src.search.hybrid import FusionRetriever
+        from qdrant_client import models
 
         store = PgresStore()
         retriever = FusionRetriever()
 
-        # Check if book exists and get info
+        # Check if document exists and get info
         with store.conn.cursor() as cur:
-            cur.execute("SELECT title, num_chunks FROM books WHERE slug = %s", (slug,))
+            cur.execute("SELECT title, num_chunks FROM documents WHERE slug = %s", (slug,))
             result = cur.fetchone()
             if not result:
-                return False, f"Book '{slug}' not found", 0
+                return False, f"Document '{slug}' not found", 0
 
-            book_title = result[0]
+            doc_title = result[0]
+            deleted_chunks = result[1] or 0
 
-        # Delete from PostgreSQL (CASCADE handles summaries)
+        # Delete from PostgreSQL (CASCADE handles summaries, BM25 index needs manual cleanup if no FK)
+        # Note: bm25_index uses chunk_id which starts with slug_
         with store.conn.cursor() as cur:
-            cur.execute("DELETE FROM books WHERE slug = %s", (slug,))
+            # First clean up BM25 tables since they use chunk_id strings, not doc_id FK
+            cur.execute("DELETE FROM bm25_index WHERE chunk_id LIKE %s", (f"{slug}_%",))
+            cur.execute("DELETE FROM bm25_doc_lens WHERE chunk_id LIKE %s", (f"{slug}_%",))
+            
+            # Now delete from main documents table
+            cur.execute("DELETE FROM documents WHERE slug = %s", (slug,))
             store.conn.commit()
-
-        # Delete from BM25 index
-        deleted_chunks = 0
-        if retriever.bm25.N == 0:
-            retriever.load_bm25_index()
-
-        # Filter out chunks for this book
-        book_chunk_ids = [
-            cid for cid in retriever.bm25.ids if cid.startswith(f"{slug}_")
-        ]
-        deleted_chunks = len(book_chunk_ids)
-
-        if book_chunk_ids:
-            # Rebuild BM25 index without this book's chunks
-            remaining_chunks = [
-                {"id": retriever.bm25.ids[i], "text": retriever.bm25.raw_docs[i]}
-                for i in range(retriever.bm25.N)
-                if not retriever.bm25.ids[i].startswith(f"{slug}_")
-            ]
-
-            # Rebuild and save index
-            retriever.bm25.build_index(remaining_chunks)
-            retriever.bm25.save_index(retriever.bm25_index_path)
 
         # Delete from Qdrant
         qdrant_success = True
         qdrant_error = ""
         try:
-            retriever.qdrant_client.delete(
-                collection_name=retriever.collection_name,
-                points_selector={
-                    "filter": {"must": [{"key": "book_slug", "match": {"value": slug}}]}
-                },
+            # FusionRetriever doesn't have qdrant_client directly, it's in vec.qdrant
+            retriever.vec.qdrant.delete(
+                collection_name=retriever.vec.COLLECTION,
+                points_selector=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="id",
+                            match=models.MatchText(text=slug)
+                        )
+                    ]
+                ),
             )
         except Exception as e:
             qdrant_success = False
@@ -257,15 +252,18 @@ def delete_book(slug: str) -> tuple[bool, str, int]:
         if qdrant_success:
             return (
                 True,
-                f"[SUCCESS] Deleted '{book_title}' ({deleted_chunks} chunks)",
+                f"[SUCCESS] Deleted '{doc_title}' ({deleted_chunks} chunks)",
                 deleted_chunks,
             )
         else:
             return (
                 True,
-                f"[WARNING] Book '{book_title}' deleted, but Qdrant cleanup failed: {qdrant_error}",
+                f"[WARNING] Document '{doc_title}' deleted from DB, but Qdrant cleanup failed: {qdrant_error}",
                 deleted_chunks,
             )
 
     except Exception as e:
-        return False, f"[ERROR] Failed to delete book: {str(e)}", 0
+        return False, f"[ERROR] Failed to delete document: {str(e)}", 0
+
+# Compatibility alias
+delete_book = delete_document

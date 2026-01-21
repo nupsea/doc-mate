@@ -28,7 +28,7 @@ class QueryMetric:
     timestamp: datetime
     query: str
     response: str
-    book_slug: Optional[str]
+    doc_slug: Optional[str]
     latency_ms: float
     success: bool
     error_message: Optional[str] = None
@@ -344,7 +344,7 @@ class MetricsCollector:
                     "query_id": q.query_id,
                     "timestamp": q.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
                     "query": q.query[:80],
-                    "book": q.book_slug or "N/A",
+                    "document": q.doc_slug or "N/A",
                     "latency_ms": round(q.latency_ms, 2),
                     "success": "OK" if q.success else "FAIL",
                     "tools": ", ".join(q.tool_calls) if q.tool_calls else "None",
@@ -417,9 +417,9 @@ class NoOpQueryTimer:
     Provides same interface as QueryTimer but does nothing.
     """
 
-    def __init__(self, query: str, book_slug: Optional[str] = None):
+    def __init__(self, query: str, doc_slug: Optional[str] = None):
         self.query = query
-        self.book_slug = book_slug
+        self.doc_slug = doc_slug
         self.query_id = f"ephemeral_{int(time.time() * 1000)}_{id(self)}"
         self.tool_calls = []
         self.num_results = None
@@ -462,9 +462,9 @@ class NoOpQueryTimer:
 class QueryTimer:
     """Context manager for timing queries."""
 
-    def __init__(self, query: str, book_slug: Optional[str] = None):
+    def __init__(self, query: str, doc_slug: Optional[str] = None):
         self.query = query
-        self.book_slug = book_slug
+        self.doc_slug = doc_slug
         self.start_time = None
         self.tool_calls = []
         self.num_results = None
@@ -497,7 +497,7 @@ class QueryTimer:
             timestamp=datetime.now(),
             query=self.query,
             response=self.response,
-            book_slug=self.book_slug,
+            doc_slug=self.doc_slug,
             latency_ms=latency_ms,
             success=self.success,
             error_message=self.error_message,
