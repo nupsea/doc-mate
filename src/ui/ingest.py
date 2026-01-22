@@ -66,6 +66,7 @@ async def ingest_new_document(
     chapter_example: str,
     force_update: bool,
     doc_type: str = 'book',
+    ephemeral: bool = False,
 ):
     """Handle document ingestion from UI (all types)."""
     if not file:
@@ -151,6 +152,9 @@ async def ingest_new_document(
 
         output += "[RUNNING] Starting ingestion...\n"
 
+        if ephemeral:
+            output += "[EPHEMERAL] Ephemeral mode enabled - no traces will be created\n"
+
         # Run ingestion (use ingest_document for all types)
         result = await ingest_document(
             slug=slug,
@@ -160,6 +164,7 @@ async def ingest_new_document(
             author=author or None,
             split_pattern=pattern,
             force_update=force_update,
+            ephemeral=ephemeral,
         )
 
         output += f"\n[SUCCESS] {doc_type.title()} ingested:\n"
@@ -281,6 +286,12 @@ def create_ingest_interface():
                     info="Overwrite existing document",
                 )
 
+                ephemeral_mode_check = gr.Checkbox(
+                    label="Ephemeral mode (no traces)",
+                    value=False,
+                    info="Disable tracing during summarization - no Phoenix traces will be created",
+                )
+
                 ingest_btn = gr.Button("Ingest Document", variant="primary", size="lg")
 
             with gr.Column(scale=1):
@@ -378,10 +389,10 @@ def create_ingest_interface():
         )
 
         async def handle_ingest(
-            doc_type, file, title, author, slug, skip_chap, chapter_ex, force
+            doc_type, file, title, author, slug, skip_chap, chapter_ex, force, ephemeral
         ):
             result = await ingest_new_document(
-                file, title, author, slug, skip_chap, chapter_ex, force, doc_type
+                file, title, author, slug, skip_chap, chapter_ex, force, doc_type, ephemeral
             )
 
             # Refresh library list with timestamp
@@ -431,6 +442,7 @@ def create_ingest_interface():
                 skip_chapters_check,
                 chapter_example_input,
                 force_update_check,
+                ephemeral_mode_check,
             ],
             [
                 ingest_output,

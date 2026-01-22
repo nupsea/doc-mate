@@ -32,7 +32,7 @@ services:
       - ./qdrant_data:/qdrant/storage
 
   phoenix:
-    image: arizephoenix/phoenix:latest
+    image: arizephoenix/phoenix:12.30.0
     container_name: phoenix
     ports:
       - "6006:6006"

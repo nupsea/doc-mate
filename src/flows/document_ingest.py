@@ -97,16 +97,30 @@ def read_and_parse(
     }
 
 
-async def generate_summaries(chunks: list, doc_type: str = 'book'):
+async def generate_summaries(chunks: list, doc_type: str = 'book', ephemeral: bool = False):
     """Generate chapter and document summaries."""
-    gen = SummaryGenerator(doc_type=doc_type)
-    chapter_summaries, document_summary = await gen.summarize_hierarchy(chunks)
+    from src.monitoring.tracer import disable_tracing, init_phoenix_tracing, is_phoenix_enabled
 
-    return {
-        "chapter_summaries": chapter_summaries,
-        "document_summary": document_summary,
-        "num_chapters": len(chapter_summaries),
-    }
+    # Disable tracing if ephemeral mode is enabled
+    tracing_was_enabled = is_phoenix_enabled()
+    if ephemeral and tracing_was_enabled:
+        print("[EPHEMERAL] Disabling Phoenix tracing for summarization...")
+        disable_tracing()
+
+    try:
+        gen = SummaryGenerator(doc_type=doc_type)
+        chapter_summaries, document_summary = await gen.summarize_hierarchy(chunks)
+
+        return {
+            "chapter_summaries": chapter_summaries,
+            "document_summary": document_summary,
+            "num_chapters": len(chapter_summaries),
+        }
+    finally:
+        # Re-enable tracing if it was disabled
+        if ephemeral and tracing_was_enabled:
+            print("[EPHEMERAL] Re-enabling Phoenix tracing...")
+            init_phoenix_tracing()
 
 
 def store_to_db(
@@ -203,12 +217,14 @@ async def ingest_document(
     max_tokens: int = 500,
     overlap: int = 100,
     force_update: bool = False,
+    ephemeral: bool = False,
 ):
     """
     Ingest any document type: validate -> parse -> summarize -> store -> build indexes -> verify.
 
     Args:
         doc_type: 'book', 'script', 'conversation', 'tech_doc', 'report'
+        ephemeral: If True, disable Phoenix tracing during summarization
     """
     print(f"Starting ingestion for: {title} (type: {doc_type}, slug: {slug})")
 
@@ -230,7 +246,7 @@ async def ingest_document(
             metadata = {}
 
     # Generate summaries (for all types)
-    summary_result = await generate_summaries(parse_result["chunks"], doc_type=doc_type)
+    summary_result = await generate_summaries(parse_result["chunks"], doc_type=doc_type, ephemeral=ephemeral)
     print(
         f"Generated {summary_result['num_chapters']} section summaries + overall summary"
     )
