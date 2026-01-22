@@ -3,7 +3,6 @@ Main Gradio application for Doc Mate.
 """
 
 import gradio as gr
-import asyncio
 import os
 import threading
 from src.mcp_client.agent import BookMateAgent
