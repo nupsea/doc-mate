@@ -24,9 +24,9 @@ def load_combined_ground_truth(book_slugs: list[str]) -> list[dict]:
             generator.load(gt_path)
             gt_data = generator.get_golden_data()
             combined_gt.extend(gt_data)
-            print(f"  → {len(gt_data)} queries")
+            print(f"  - {len(gt_data)} queries")
         except FileNotFoundError:
-            print(f"  ⚠ Ground truth not found for {slug}")
+            print(f"  Warning: Ground truth not found for {slug}")
 
     return combined_gt
 
@@ -85,7 +85,7 @@ def evaluate_readonly(book_slugs: list[str]):
     combined_gt = load_combined_ground_truth(book_slugs)
 
     if not combined_gt:
-        print("\n❌ No ground truth found!")
+        print("\nNo ground truth found!")
         print("Generate with: python scripts/generate_ground_truth_simple.py hegel mam")
         return None
 
@@ -105,7 +105,7 @@ def evaluate_readonly(book_slugs: list[str]):
     qdrant = QdrantClient("localhost", port=6333)
 
     if not qdrant.collection_exists("book_chunks"):
-        print("❌ Error: Qdrant collection 'book_chunks' not found!")
+        print("Error: Qdrant collection 'book_chunks' not found!")
         print("Please ensure books are ingested first.")
         return None
 
@@ -131,7 +131,7 @@ def evaluate_readonly(book_slugs: list[str]):
         retriever.load_bm25_index()
         print(f"Loaded BM25 index: {retriever.bm25.N} documents")
     except FileNotFoundError:
-        print("⚠ BM25 index not found, will use vector-only search")
+        print("BM25 index not found, will use vector-only search")
 
     # Run evaluation
     results = []
@@ -184,7 +184,7 @@ def evaluate_readonly(book_slugs: list[str]):
         print(f"    MRR @ 7:        {book_metrics['mrr_at_7']:.3f}")
 
     print("\n" + "="*80)
-    print("\n✓ Evaluation complete - no changes made to collection\n")
+    print("\nEvaluation complete - no changes made to collection\n")
 
     return {"overall": metrics, "per_book": per_book_metrics}
 

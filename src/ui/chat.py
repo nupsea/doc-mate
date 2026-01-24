@@ -71,9 +71,9 @@ def update_model_choices(provider, privacy_mode):
 
     if force_local or provider == "local":
         return gr.update(
-            choices=[("Llama 3.1 8B (Local)", "llama3.1:8b")],
-            value="llama3.1:8b",
-            info="Local Ollama model - good for comparisons"
+            choices=[("Llama 3.2 3B (Fast Local)", "llama3.2:3b"), ("Llama 3.1 8B (Local)", "llama3.1:8b")],
+            value="llama3.2:3b",
+            info="Local Ollama model - 3B is faster, 8B is smarter"
         ), gr.update(value="local", interactive=not force_local)
     else:  # openai (normal or ephemeral modes)
         return gr.update(
@@ -182,7 +182,7 @@ def create_chat_interface(ui):
 
                 feedback_status = gr.Textbox(visible=False, show_label=False)
 
-                with gr.Accordion("💡 Tips", open=False):
+                with gr.Accordion("Tips", open=False):
                     gr.Markdown(
                         """
                         - **Doc Selection**: Use dropdown or mention document title in your query
@@ -256,4 +256,4 @@ def create_chat_interface(ui):
         def load_doc_list():
             return format_document_list(get_available_documents())
 
-    return doc_dropdown, doc_list, load_doc_list
+    return (doc_dropdown, doc_list, load_doc_list)

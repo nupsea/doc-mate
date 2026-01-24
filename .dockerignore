@@ -28,6 +28,9 @@ docker-compose.yml
 # Data (volumes will mount these)
 pgdata/
 qdrant_data/
+DATA/
+hf_cache/
+indexes/
 
 # Environment
 .env
