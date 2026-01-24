@@ -17,11 +17,26 @@ Environment variables:
 """
 
 import os
+import socket
+from urllib.parse import urlparse
 from phoenix.otel import register
 from openinference.instrumentation.openai import OpenAIInstrumentor
 
 _phoenix_initialized = False
 _instrumentor = None
+
+
+def _is_collector_reachable(endpoint: str) -> bool:
+    """Check if the Phoenix collector is reachable."""
+    try:
+        parsed = urlparse(endpoint)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 4317
+        
+        with socket.create_connection((host, port), timeout=1.0):
+            return True
+    except (socket.timeout, socket.error):
+        return False
 
 
 def init_phoenix_tracing():
@@ -38,6 +53,12 @@ def init_phoenix_tracing():
 
     try:
         collector_endpoint = os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:4317")
+        
+        # Check connectivity before initializing to avoid gRPC error spam
+        if not _is_collector_reachable(collector_endpoint):
+            print(f"[PHOENIX] Tracing skipped: Collector at {collector_endpoint} is not reachable")
+            return
+
         project_name = os.getenv("PHOENIX_PROJECT_NAME", "book-mate")
 
         tracer_provider = register(

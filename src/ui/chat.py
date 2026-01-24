@@ -71,9 +71,9 @@ def update_model_choices(provider, privacy_mode):
 
     if force_local or provider == "local":
         return gr.update(
-            choices=[("Llama 3.1 8B (Local)", "llama3.1:8b")],
-            value="llama3.1:8b",
-            info="Local Ollama model - good for comparisons"
+            choices=[("Llama 3.2 3B (Fast Local)", "llama3.2:3b"), ("Llama 3.1 8B (Local)", "llama3.1:8b")],
+            value="llama3.2:3b",
+            info="Local Ollama model - 3B is faster, 8B is smarter"
         ), gr.update(value="local", interactive=not force_local)
     else:  # openai (normal or ephemeral modes)
         return gr.update(

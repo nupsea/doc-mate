@@ -100,22 +100,42 @@ docker exec -it doc-mate-ollama ollama pull llama3.1:8b
 docker exec -it doc-mate-ollama ollama list
 ```
 
-### Option 3: Ollama Installed Separately (Alternative)
+### Option 3: Ollama Installed Separately (Recommended for Mac/Windows)
 
-If running Ollama outside Docker:
+For best performance on macOS (M1/M2/M3 chips), run Ollama natively on your host machine to use the GPU/Neural Engine.
 
+**1. Install Ollama:**
+
+**macOS:**
+- [Download from Ollama.com](https://ollama.com/download/mac)
+- OR use Homebrew: `brew install ollama`
+
+**Linux:**
 ```bash
-# Install on host
 curl -fsSL https://ollama.com/install.sh | sh
-ollama pull llama3.1:8b
-ollama serve
 ```
 
-Update `.env`:
+**2. Start Server:**
+
+Ensure it listens on all interfaces so Docker can see it:
+
 ```bash
-OLLAMA_BASE_URL=http://host.docker.internal:11434  # macOS/Windows
+OLLAMA_HOST=0.0.0.0 ollama serve
+```
+
+**3. Pull Model:**
+
+```bash
+ollama pull llama3.2:3b
+```
+
+**4. Configure Doc-Mate:**
+
+Update `.env` (or docker-compose.yml):
+```bash
+OLLAMA_BASE_URL=http://host.docker.internal:11434/v1  # macOS/Windows
 # OR
-OLLAMA_BASE_URL=http://172.17.0.1:11434            # Linux
+OLLAMA_BASE_URL=http://172.17.0.1:11434/v1            # Linux
 ```
 
 Then start:
@@ -223,7 +243,7 @@ Go to http://localhost:6006 for detailed LLM observability:
        │
 ┌──────▼────────────┐         ┌──────────────┐
 │  DocMateAgent     │◄───────►│  LLM Provider│
-│  (MCP Client)     │         │  Router      │
+│  (LangGraph)      │         │  Router      │
 └──────┬────────────┘         └──────┬───────┘
        │                             │
        │                    ┌────────▼────────┐
@@ -233,8 +253,8 @@ Go to http://localhost:6006 for detailed LLM observability:
        │                    └─────────────────┘
        │
 ┌──────▼────────────┐
-│   MCP Server      │
-│  (Document Tools) │
+│   Agent Tools     │
+│  (Python Funcs)   │
 └──────┬────────────┘
        │
        ├──────────►  ╭─────────────────────╮
