@@ -182,7 +182,7 @@ def create_chat_interface(ui):
 
                 feedback_status = gr.Textbox(visible=False, show_label=False)
 
-                with gr.Accordion("💡 Tips", open=False):
+                with gr.Accordion("Tips", open=False):
                     gr.Markdown(
                         """
                         - **Doc Selection**: Use dropdown or mention document title in your query
@@ -256,4 +256,4 @@ def create_chat_interface(ui):
         def load_doc_list():
             return format_document_list(get_available_documents())
 
-    return doc_dropdown, doc_list, load_doc_list
+    return (doc_dropdown, doc_list, load_doc_list)

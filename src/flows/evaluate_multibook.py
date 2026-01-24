@@ -105,7 +105,7 @@ def load_chunks_for_books(book_slugs: list[str]) -> list[dict]:
             )
             chunks = reader.parse(max_tokens=500, overlap=100)
 
-        print(f"  → {len(chunks)} chunks")
+        print(f"  - {len(chunks)} chunks")
         all_chunks.extend(chunks)
 
     return all_chunks
@@ -132,9 +132,9 @@ def load_combined_ground_truth(book_slugs: list[str]) -> list[dict]:
             generator.load(gt_path)
             gt_data = generator.get_golden_data()
             combined_gt.extend(gt_data)
-            print(f"  → {len(gt_data)} queries")
+            print(f"  - {len(gt_data)} queries")
         except FileNotFoundError:
-            print(f"  ⚠ Warning: Ground truth not found for {slug}")
+            print(f"  Warning: Ground truth not found for {slug}")
             print(f"     Generate it with: python scripts/generate_{slug}_ground_truth.py")
 
     return combined_gt
@@ -168,7 +168,7 @@ def evaluate_multibook(book_slugs: list[str]):
     combined_gt = load_combined_ground_truth(book_slugs)
 
     if not combined_gt:
-        print("\n❌ No ground truth data found for any of the specified books!")
+        print("\nNo ground truth data found for any of the specified books!")
         print("\nGenerate ground truth for Marcus Aurelius:")
         print("  python scripts/generate_mma_ground_truth.py")
         return None

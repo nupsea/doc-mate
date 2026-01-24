@@ -6,14 +6,12 @@ Defines the state machine for reasoning and tool execution.
 import operator
 from typing import Annotated, List, TypedDict, Dict, Any, Literal
 
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import BaseMessage, AIMessage
 from langchain_openai import ChatOpenAI
-from langchain_community.llms import Ollama
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 
 from src.flows.agent_tools import ALL_TOOLS
-from src.mcp_client.prompts import get_system_prompt
 from src.llm.providers import ModelRouter
 
 # -----------------------------------------------------------------------------

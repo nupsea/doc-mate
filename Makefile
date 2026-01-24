@@ -28,11 +28,11 @@ full:
 local-ai:
 	@echo "Checking for Native Ollama..."
 	@if curl -s http://localhost:11434 > /dev/null; then \
-		echo "✅ Native Ollama detected! Starting Doc-Mate..."; \
+		echo "Native Ollama detected! Starting Doc-Mate..."; \
 		docker compose --profile core up -d; \
 		$(MAKE) wait-ui; \
 	else \
-		echo "❌ Native Ollama NOT found on port 11434."; \
+		echo "Native Ollama NOT found on port 11434."; \
 		echo ""; \
 		echo "To use Private/Internal mode with hardware acceleration:"; \
 		echo "1. Open a new terminal"; \
