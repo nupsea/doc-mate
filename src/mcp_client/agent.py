@@ -40,7 +40,10 @@ class DocMateAgent:
         self.ephemeral = ephemeral
         self.internal_mode = internal_mode
 
-        if not self.ephemeral:
+        from src.monitoring.tracer import disable_tracing
+        if self.ephemeral:
+            disable_tracing()
+        else:
             init_phoenix_tracing()
 
         if self.config.enable_judge and not self.ephemeral:
@@ -111,6 +114,7 @@ class DocMateAgent:
         self,
         user_message: str,
         conversation_history: list = None,
+        selected_doc: str = None,
     ) -> tuple[str, list, str]:
         """
         Send a message and let LangGraph handle the reasoning/tool loop.
@@ -141,7 +145,7 @@ class DocMateAgent:
                     "provider": self.llm_provider.provider_name,
                     "model": self.llm_provider.model,
                     "doc_types": doc_types,
-                    "selected_doc_slug": "" # Optional future expansion
+                    "selected_doc_slug": selected_doc or "",
                 })
                 
                 # 4. Extract final message

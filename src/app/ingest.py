@@ -3,7 +3,7 @@ import asyncio
 
 from src.content.reader import GutenbergReader
 from src.content.store import PgresStore
-from src.flows.book_ingest import ingest_book
+from src.flows.document_ingest import ingest_book
 from src.llm.generator import SummaryGenerator
 
 

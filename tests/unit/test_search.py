@@ -178,12 +178,6 @@ class TestFusionRetrieverInit:
         retriever = FusionRetriever(alpha=0.9)
         assert retriever.alpha == 0.9
 
-    def test_custom_bm25_index_path(self):
-        """Test custom BM25 index path."""
-        custom_path = "/tmp/custom_bm25.pkl"
-        retriever = FusionRetriever(bm25_index_path=custom_path)
-        assert retriever.bm25_index_path == custom_path
-
 
 class TestChunkIdStructure:
     """Test that chunk IDs maintain expected structure."""

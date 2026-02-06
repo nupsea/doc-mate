@@ -35,7 +35,7 @@ class LLMConfig:
 
         # Local (Ollama)
         OLLAMA_BASE_URL: Ollama API base URL (default: http://localhost:11434/v1)
-        OLLAMA_MODEL: Model name (default: llama3.2:3b, auto-switches to 8b for comparisons)
+        OLLAMA_MODEL: Model name (default: granite3.2:8b)
     """
 
     # Provider selection
@@ -56,7 +56,7 @@ class LLMConfig:
 
     # Local (Ollama) configuration
     ollama_base_url: str = "http://localhost:11434/v1"
-    ollama_model: str = "llama3.2:3b"  # Fast default, auto-switches to 8b for comparisons
+    ollama_model: str = "granite3.2:8b"
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
@@ -92,7 +92,7 @@ class LLMConfig:
 
             # Local (Ollama)
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
-            ollama_model=os.getenv("OLLAMA_MODEL", "llama3.2:3b"),
+            ollama_model=os.getenv("OLLAMA_MODEL", "granite3.2:8b"),
         )
 
     def validate(self) -> None:

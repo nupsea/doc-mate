@@ -10,7 +10,8 @@ A universal document assistant powered by LLMs that lets you upload and chat wit
 ### Core Capabilities
 - **Multi-Format Support**: Books, tech docs, PDFs, scripts, reports, conversations
 - **Intelligent Parsing**: Document-type aware parsing (chapters, scenes, sections, turns)
-- **Hybrid Search**: Combines BM25 keyword search with semantic vector search
+- **Knowledge Graph**: Extracts entities and relationships for deep context (e.g. "How is X related to Y?")
+- **Hybrid Search**: Triple Fusion (BM25 + Vector + Graph) for maximum recall and precision
 - **Multi-Modal**: Text + images + tables (coming in Phase 3)
 - **AI Chat Interface**: Ask questions with context-aware responses and citations
 - **Multi-Document Search**: Compare themes across multiple documents simultaneously
@@ -32,9 +33,9 @@ A universal document assistant powered by LLMs that lets you upload and chat wit
 
 ## Current Status
 
-**Version**: 0.2.0
-**Phase**: Phase 2 Complete ✅ (Multi-document types + Local LLM + Privacy modes)
-**Next**: Phase 3 - Graph Database Integration
+**Version**: 0.3.0
+**Phase**: Phase 3 Complete ✅ (Graph Knowledge Layer + Triple Hybrid Search)
+**Next**: Phase 4 - Advanced Evaluation & Optimization
 
 See [docs/DEVELOPMENT_PHASES.md](docs/DEVELOPMENT_PHASES.md) for detailed roadmap.
 
@@ -274,9 +275,11 @@ Go to http://localhost:6006 for detailed LLM observability:
 
 ### Key Components
 
-- **PostgreSQL**: Stores document metadata, summaries, and query metrics
+- **PostgreSQL**: Stores document metadata, summaries, metrics, and **Knowledge Graph**
 - **Qdrant**: Vector database for semantic search
 - **BM25**: Keyword-based search index
+- **LangGraph Agent**: State machine for reasoning and tool orchestration
+- **Graph Engine**: Entity extraction, resolution, and recursive traversal
 - **MCP Server**: Exposes document tools (search, summaries) to agent
 - **LLM Router**: Selects optimal model (OpenAI/Anthropic/Local) based on query
 - **Phoenix**: LLM observability via OpenTelemetry traces

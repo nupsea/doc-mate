@@ -3,7 +3,7 @@ Quick tests for conversation search improvements.
 """
 
 from datetime import datetime, timedelta
-from src.flows.book_query import _diversify_conversation_results, _parse_timestamp
+from src.flows.document_query import _diversify_conversation_results, _parse_timestamp
 
 
 def test_all():

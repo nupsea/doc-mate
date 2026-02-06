@@ -1,0 +1,27 @@
+[2024-05-12 08:00:00] Sarah (Lead): Team, we have a situation. Customer support is reporting login failures for EU users.
+[2024-05-12 08:01:15] Mike (Backend): I see it. Error rate spiked at 07:55 UTC. Looks like the Auth service is timing out.
+[2024-05-12 08:02:00] Jen (DevOps): I deployed the new Redis cache layer to EU-West-1 last night. Could that be it?
+[2024-05-12 08:02:45] Sarah: Potentially. Mike, can you check the logs for Redis connection errors?
+[2024-05-12 08:03:30] Mike: Checking... Yeah, lots of "Connection Refused". Jen, is the security group allowing traffic from the Auth pods?
+[2024-05-12 08:05:00] Jen: Double-checking Terraform config...
+[2024-05-12 08:06:00] David (Frontend): FYI, the frontend is showing a generic "Something went wrong" message. We should probably update the status page.
+[2024-05-12 08:06:30] Sarah: Good call David. Please post an update: "Investigating login issues in EU region".
+[2024-05-12 08:08:00] Jen: Found it. The new security group rule was missing the port 6379 allow-list for the new subnet. Applying fix now.
+[2024-05-12 08:10:00] Mike: Error rate is dropping... connecting... okay, we are back to green.
+[2024-05-12 08:11:00] Sarah: Great work. Let's monitor for 15 mins.
+[2024-05-12 09:30:00] Sarah: Okay, incident closed. But we need to discuss the new Billing API integration for next sprint.
+[2024-05-12 09:31:00] Raj (Product): I wanted to bring that up. The requirements changed. We need to support multi-currency by default.
+[2024-05-12 09:32:00] Mike: That's a huge change, Raj. The schema we agreed on assumes USD base.
+[2024-05-12 09:33:00] Raj: I know, but Sales promised it to the Enterprise client in Japan.
+[2024-05-12 09:34:00] Sarah: We can't rewrite the schema now without delaying the release.
+[2024-05-12 09:35:00] Jen: What if we use a currency conversion layer middleware? I wrote a prototype last month.
+[2024-05-12 09:36:00] Mike: That might work. Jen, can you share the repo?
+[2024-05-12 09:37:00] Jen: Sent. It uses OpenExchangeRates API.
+[2024-05-12 10:00:00] David: By the way, is anyone reviewing my PR for the dark mode toggle? It's been sitting there for 3 days.
+[2024-05-12 10:01:00] Sarah: I'll look at it after lunch, David. Priority was the incident.
+[2024-05-12 10:05:00] Raj: Also, Sarah, did you get the email from Legal about the GDPR audit?
+[2024-05-12 10:06:00] Sarah: Yes, Raj. It's on my list. We need to purge user data older than 3 years.
+[2024-05-12 10:07:00] Mike: Whoa, purge? We use that for historical trend analysis.
+[2024-05-12 10:08:00] Sarah: We can anonymize it, Mike. But the PII has to go.
+[2024-05-12 14:00:00] Sarah: Update on the billing schema: Jen's middleware solution works. We will proceed with that.
+[2024-05-12 14:05:00] Raj: Awesome. I'll tell Sales.

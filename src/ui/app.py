@@ -120,7 +120,8 @@ class DocMateUI:
                 if bot_msg:
                     conversation_history.append({"role": "assistant", "content": bot_msg})
 
-            response, _, query_id = await agent.chat(message, conversation_history)
+            doc_slug = selected_doc if selected_doc and selected_doc != "none" else None
+            response, _, query_id = await agent.chat(message, conversation_history, selected_doc=doc_slug)
             return response, query_id
 
         except Exception as e:

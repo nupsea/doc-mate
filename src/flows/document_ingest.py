@@ -12,6 +12,9 @@ from src.content.parsers import get_parser
 from src.content.store import PgresStore
 from src.llm.generator import SummaryGenerator
 from src.search.hybrid import FusionRetriever
+from src.graph.extractor import EntityExtractor
+from src.graph.resolver import EntityResolver
+from src.graph.store import PostgresGraphStore
 
 
 def validate_inputs(slug: str, file_path: str, title: str, force_update: bool = False):
@@ -122,7 +125,6 @@ async def generate_summaries(chunks: list, doc_type: str = 'book', ephemeral: bo
             print("[EPHEMERAL] Re-enabling Phoenix tracing...")
             init_phoenix_tracing()
 
-
 def store_to_db(
     slug: str,
     title: str,
@@ -134,6 +136,7 @@ def store_to_db(
     doc_type: str = 'book',
     metadata: dict = None,
     force_update: bool = False,
+    is_ephemeral: bool = False,
 ):
     """Store document metadata and summaries to database."""
     store = PgresStore()
@@ -149,7 +152,8 @@ def store_to_db(
         author=author,
         num_chunks=num_chunks,
         num_chars=num_chars,
-        metadata=metadata
+        metadata=metadata,
+        is_ephemeral=is_ephemeral
     )
 
     # Store summaries (works for all doc types)
@@ -157,7 +161,6 @@ def store_to_db(
         store.store_summaries(slug, chapter_summaries, document_summary)
 
     return {"doc_id": doc_id, "slug": slug}
-
 
 def build_search_indexes(chunks: list):
     """Build BM25 and vector search indexes (append to existing indexes)."""
@@ -174,6 +177,84 @@ def build_search_indexes(chunks: list):
         "bm25_indexed": len(chunks), # BM25 is updated with these chunks
         "vector_indexed": len(chunks),
         "new_chunks": len(chunks),
+    }
+
+
+async def build_graph_index(chunks: list, doc_id: int, doc_type: str = 'book', ephemeral: bool = False):
+    """
+    Extract, resolve, and store graph entities and relationships incrementally.
+    """
+    print(f"[GRAPH] Starting graph extraction for {len(chunks)} chunks...")
+    
+    # Initialize components
+    # Note: Using small batch size to avoid context limits and improve precision
+    extractor = EntityExtractor(model_name="gpt-4o-mini", batch_size=8)
+    resolver = EntityResolver()
+    store = PostgresGraphStore()
+
+    # Clear existing graph for this doc if it exists (re-ingest)
+    store.delete_graph_for_doc(doc_id)
+
+    # Incremental Processing
+    BATCH_SIZE = 40  # Process 40 chunks at a time (5 extractor calls of 8)
+    total_entities_count = 0
+    total_rels_count = 0
+    
+    for i in range(0, len(chunks), BATCH_SIZE):
+        chunk_batch = chunks[i : i + BATCH_SIZE]
+        print(f"[GRAPH] Processing chunks {i} to {min(i+BATCH_SIZE, len(chunks))} ({len(chunk_batch)} chunks)...")
+        
+        # 1. Extraction
+        entities, relationships = await extractor.extract_from_chunks(chunk_batch, doc_type)
+        
+        if not entities and not relationships:
+            print(f"[GRAPH] Batch {i} yielded no entities. Continuing...")
+            continue
+
+        # 1b. Kinship Resolution (Pre-process)
+        # Link "Mia's sister" to "Mia" before main resolution
+        entities, relationships = resolver.resolve_kinship_references(entities, relationships)
+
+        # 2. Resolution (Local to this batch for now, effectively)
+        # Note: Global resolution is better, but incremental is safer for large docs.
+        # Exact name matches will merge in DB automatically.
+        resolved_entities, name_mapping = resolver.resolve(entities)
+        
+        # Update relationships with resolved names
+        for rel in relationships:
+            if rel.source_entity in name_mapping:
+                rel.source_entity = name_mapping[rel.source_entity]
+            if rel.target_entity in name_mapping:
+                rel.target_entity = name_mapping[rel.target_entity]
+
+        # 3. Storage (Immediate)
+        e_ids = store.store_entities(doc_id, resolved_entities)
+        r_count = store.store_relationships(doc_id, relationships)
+        print(f"[GRAPH] Stored batch: {len(e_ids)} entities, {r_count} relationships")
+        
+        total_entities_count += len(e_ids)
+        total_rels_count += r_count
+
+    # 4. Episode Extraction (if conversation) - done at end for context
+    episodes_count = 0
+    if doc_type == "conversation":
+        print("[GRAPH] Extracting conversation episodes...")
+        # Process episodes in larger batches or all at once?
+        # Episodes usually need more sequential context. 
+        # Using the same batch strategy for safety.
+        for i in range(0, len(chunks), BATCH_SIZE):
+            chunk_batch = chunks[i : i + BATCH_SIZE]
+            episodes = await extractor.extract_episodes(chunk_batch)
+            cnt = store.store_episodes(doc_id, episodes)
+            episodes_count += cnt
+        print(f"[GRAPH] Stored {episodes_count} total episodes")
+
+    return {
+        "entities": total_entities_count,
+        "relationships": total_rels_count,
+        "episodes": episodes_count,
+        "status": "persisted",
+        "summary_text": ""
     }
 
 
@@ -262,6 +343,7 @@ async def ingest_document(
         doc_type,
         metadata,
         force_update,
+        is_ephemeral=ephemeral # Pass the flag to DB
     )
     print(f"Stored to database - Document ID: {db_result['doc_id']}")
 
@@ -269,6 +351,10 @@ async def ingest_document(
     print(
         f"Built search indexes - BM25: {search_result['bm25_indexed']}, Vector: {search_result['vector_indexed']} chunks"
     )
+
+    # Build Graph Index
+    graph_stats = await build_graph_index(parse_result["chunks"], db_result["doc_id"], doc_type, ephemeral=ephemeral)
+    print(f"Built Knowledge Graph - Entities: {graph_stats['entities']}, Relations: {graph_stats['relationships']}")
 
     verify_result = verify_ingestion(slug, summary_result["num_chapters"])
     print(f"Verification complete - Status: {verify_result['status']}")
@@ -281,6 +367,7 @@ async def ingest_document(
         "chapters": verify_result["chapters_verified"],
         "chunks": parse_result["num_chunks"],
         "search_indexed": search_result["bm25_indexed"],
+        "graph_stats": graph_stats,
         "status": "success",
     }
 

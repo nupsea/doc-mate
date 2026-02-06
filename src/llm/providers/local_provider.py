@@ -1,9 +1,7 @@
 """
 Local LLM provider implementation for Ollama.
 
-Supports dual-model mode:
-- llama3.2:3b (default, fast)
-- llama3.1:8b (for comparisons only)
+Default model: granite3.2:8b (optimized for RAG and tool calling)
 """
 
 import os
@@ -14,7 +12,6 @@ import requests
 import asyncio
 
 from .base import LLMProvider, ChatCompletionResponse
-from .query_classifier import needs_complex_model
 
 logger = logging.getLogger(__name__)
 
@@ -40,24 +37,19 @@ class LocalProvider(LLMProvider):
     def __init__(
         self,
         base_url: Optional[str] = None,
-        model: str = "llama3.2:3b",  # Default to fast model
+        model: str = "granite3.2:8b",
         timeout: int = 120,
         max_concurrent_requests: int = 2,
     ):
         """
         Initialize Local (Ollama) provider.
 
-        Default: llama3.2:3b (fast)
-        Auto-switches to llama3.1:8b for comparisons
+        Default: granite3.2:8b (optimized for RAG + tool calling)
         """
         self.base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
         self.model = model
         self.timeout = timeout
         self.max_concurrent_requests = max_concurrent_requests
-
-        # Dual model config
-        self.fast_model = "llama3.2:3b"
-        self.complex_model = "llama3.1:8b"
 
         # Concurrency control
         global _request_semaphore
@@ -69,7 +61,7 @@ class LocalProvider(LLMProvider):
         self.client = OpenAI(base_url=self.base_url, api_key="ollama", timeout=timeout)
         self.async_client = AsyncOpenAI(base_url=self.base_url, api_key="ollama", timeout=timeout)
 
-        logger.info(f"[LOCAL] Default: {self.fast_model}, Complex: {self.complex_model}")
+        logger.info(f"[LOCAL] Model: {self.model}")
 
     def chat_completion(
         self,
@@ -82,23 +74,16 @@ class LocalProvider(LLMProvider):
     ) -> ChatCompletionResponse:
         """Synchronous chat completion via Ollama."""
         try:
-            # Select model: check if query needs complex model
             if not model:
-                user_query = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
-                if needs_complex_model(user_query):
-                    model = self.complex_model
-                    logger.info(f"[ROUTING] Using {model} for comparison query")
-                else:
-                    model = self.fast_model
+                model = self.model
 
             # Handle JSON response format
             if kwargs.get("response_format", {}).get("type") == "json_object":
                 kwargs.pop("response_format")
                 messages = self._inject_json_instruction(messages)
 
-            # Set max_tokens
             if max_tokens is None:
-                max_tokens = 1024 if model == self.fast_model else 2048
+                max_tokens = 2048
 
             response = self.client.chat.completions.create(
                 model=model,
@@ -126,23 +111,16 @@ class LocalProvider(LLMProvider):
         """Asynchronous chat completion via Ollama with concurrency control."""
         async with self._semaphore:
             try:
-                # Select model: check if query needs complex model
                 if not model:
-                    user_query = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
-                    if needs_complex_model(user_query):
-                        model = self.complex_model
-                        logger.info(f"[ROUTING] Using {model} for comparison query")
-                    else:
-                        model = self.fast_model
+                    model = self.model
 
                 # Handle JSON response format
                 if kwargs.get("response_format", {}).get("type") == "json_object":
                     kwargs.pop("response_format")
                     messages = self._inject_json_instruction(messages)
 
-                # Set max_tokens
                 if max_tokens is None:
-                    max_tokens = 1024 if model == self.fast_model else 2048
+                    max_tokens = 2048
 
                 response = await self.async_client.chat.completions.create(
                     model=model,

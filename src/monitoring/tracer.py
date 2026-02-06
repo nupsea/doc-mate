@@ -2,7 +2,7 @@
 Phoenix tracing initialization for LLM observability.
 
 Phoenix automatically captures all OpenAI API calls (prompts, responses, tokens, latency)
-and visualizes them in a web UI at http://localhost:6006.
+and visualizes them in a web UI (default: http://localhost:6006).
 
 Usage:
     Call init_phoenix_tracing() once at application startup, before any OpenAI calls.
@@ -12,6 +12,7 @@ Usage:
 
 Environment variables:
     PHOENIX_COLLECTOR_ENDPOINT: Collector URL (default: http://localhost:4317)
+    PHOENIX_UI_URL: UI URL for links in the application (default: http://localhost:6006)
     PHOENIX_PROJECT_NAME: Project name in UI (default: book-mate)
     DISABLE_TRACING: Set to 'true' to completely disable tracing
 """
@@ -40,12 +41,11 @@ def _is_collector_reachable(endpoint: str) -> bool:
 
 
 def init_phoenix_tracing():
-    """Initialize Phoenix tracing. Call once at startup."""
+    """Initialize Phoenix tracing. Call once at startup or when re-enabling."""
     global _phoenix_initialized, _instrumentor
 
-    # Check if tracing is explicitly disabled (for ephemeral mode)
+    # Check if tracing is explicitly disabled via env var (global override)
     if os.getenv("DISABLE_TRACING", "false").lower() == "true":
-        print("[PHOENIX] Tracing disabled (ephemeral mode)")
         return
 
     if _phoenix_initialized:
@@ -60,6 +60,7 @@ def init_phoenix_tracing():
             return
 
         project_name = os.getenv("PHOENIX_PROJECT_NAME", "book-mate")
+        ui_url = os.getenv("PHOENIX_UI_URL", "http://localhost:6006")
 
         tracer_provider = register(
             project_name=project_name,
@@ -70,7 +71,7 @@ def init_phoenix_tracing():
         _instrumentor.instrument(tracer_provider=tracer_provider)
 
         _phoenix_initialized = True
-        print(f"[PHOENIX] Initialized | Project: {project_name} | UI: {collector_endpoint}")
+        print(f"[PHOENIX] Initialized | Project: {project_name} | UI: {ui_url}")
 
     except Exception as e:
         print(f"[PHOENIX] Failed to initialize: {e}")

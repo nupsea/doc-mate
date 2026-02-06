@@ -6,18 +6,22 @@ import re
 from src.content.store import PgresStore
 
 
-def get_available_documents():
+def get_available_documents(include_ephemeral: bool = True):
     """Fetch list of documents from database with slug, title, author, chunks, and added_at."""
     try:
         store = PgresStore()
         with store.conn.cursor() as cur:
-            cur.execute(
-                """
+            query = """
                 SELECT slug, title, author, num_chunks, added_at
                 FROM documents
-                ORDER BY added_at DESC
             """
-            )
+            
+            if not include_ephemeral:
+                query += " WHERE is_ephemeral = FALSE"
+                
+            query += " ORDER BY added_at DESC"
+            
+            cur.execute(query)
             docs = cur.fetchall()
         return docs
     except Exception as e:

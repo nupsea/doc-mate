@@ -1,4 +1,4 @@
-.PHONY: up down start build logs dev observability full local-ai
+.PHONY: up down start build clean-build logs dev observability full local-ai core-only
 
 # Include .env file
 include .env
@@ -6,22 +6,25 @@ export
 
 # --- Core Commands ---
 
-# Default: Start core services (lightweight)
+# Default: Start core services + tracing
 up:
-	docker compose --profile core up -d
-	@$(MAKE) wait-ui
-
-# Alias for up
-dev: up
-
-# Start with Phoenix tracing enabled
-observability:
 	docker compose --profile core --profile observability up -d
 	@$(MAKE) wait-ui
 
+# Core-only (lightweight)
+core-only:
+	docker compose --profile core up -d
+	@$(MAKE) wait-ui
+
+# Alias for core-only (keeping dev lightweight)
+dev: core-only
+
+# Start with Phoenix tracing enabled (now part of default up)
+observability: up
+
 # Start with Docker-based Ollama (Backup option)
 full:
-	docker compose --profile full --profile local-ai up -d
+	docker compose --profile full --profile local-ai --profile observability up -d
 	@$(MAKE) wait-ui
 
 # Check/Start Native Local AI (Recommended for Mac)
@@ -47,7 +50,11 @@ down:
 	docker compose --profile '*' down
 
 build:
-	docker compose build
+	docker compose --profile core build
+
+# Force a clean rebuild (ignore cache)
+clean-build:
+	docker compose --profile core build --no-cache
 
 logs:
 	docker compose logs -f app

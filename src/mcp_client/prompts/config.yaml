@@ -91,6 +91,7 @@ simple:
     - If something is not stated, say "The document does not specify" instead of inferring.
 
     TOOLS:
+    - Relationship questions ("How is X related to Y?", "Who is X?"): explore_entity_graph with entity name and slug
     - Multiple documents: search_multiple_documents with ALL slugs
     - Single document: search_document with one slug
 

@@ -134,7 +134,7 @@ def preload_retriever():
     logger.info("Retriever model preloaded successfully.")
 
 
-def search_document_content(query: str, doc_identifier: str | int, limit: int = 5):
+def search_document_content(query: str, doc_identifier: str | int, limit: int = 5, hint_entities: list[str] = None):
     """
     Search document content using hybrid search (BM25 + vector).
     Returns chunk IDs and fetches chunk text from Qdrant.
@@ -158,7 +158,7 @@ def search_document_content(query: str, doc_identifier: str | int, limit: int = 
         retriever = get_retriever()
         # Pass doc_identifier as doc_slug to filter search results DURING search, not after
         chunk_ids = retriever.id_search(
-            query, topk=limit, doc_slug=doc_identifier
+            query, topk=limit, doc_slug=doc_identifier, hint_entities=hint_entities
         )
 
         logger.debug(f"Hybrid search returned {len(chunk_ids)} chunk IDs for document '{doc_identifier}':")
@@ -168,15 +168,15 @@ def search_document_content(query: str, doc_identifier: str | int, limit: int = 
         # Fetch full chunk details from Qdrant by ID
         chunks_full = retriever.vec.get_chunks_by_ids(chunk_ids)
 
-        # Truncate text and preserve metadata for citations
+        # Preserve full metadata for citations and type-aware formatting
         chunks_with_text = []
         for chunk in chunks_full:
             text = chunk["text"]
             chunks_with_text.append(
                 {
                     "id": chunk["id"],
-                    "text": text[:800] + "..." if len(text) > 800 else text,
-                    "metadata": chunk.get("metadata", {}),  # Keep metadata for citations
+                    "text": text, # Pass full text, aggregator will handle truncation if needed
+                    "metadata": chunk.get("metadata", {}),
                 }
             )
 
@@ -232,6 +232,40 @@ def get_document_summary(doc_identifier: str | int):
 
     return {"summary": summary, "length": len(summary) if summary else 0}
 
+
+def get_adjacent_chunks(doc_slug: str, chunk_id: str, window: int = 2) -> list[dict]:
+    """
+    Fetch adjacent chunks (before and after) based on chunk_id sequence.
+    Useful for expanding conversation context.
+    """
+    try:
+        # Assuming chunk_ids are sequential like "slug_01_001", "slug_01_002"
+        # We can reconstruct IDs or use a DB lookup if chunks are stored with order.
+        # For now, we'll try a Qdrant ID lookup pattern if possible, or fall back to DB.
+        
+        # Parse the ID to get the index
+        # Format: {slug}_chk_{index} or similar. Let's assume standard format.
+        parts = chunk_id.rsplit('_', 1)
+        if len(parts) != 2 or not parts[1].isdigit():
+            return []
+            
+        base_id = parts[0]
+        current_idx = int(parts[1])
+        
+        target_ids = []
+        for i in range(current_idx - window, current_idx + window + 1):
+            if i == current_idx or i < 0:
+                continue
+            # Zero-pad the index to match 6-digit standard (e.g., 000012)
+            target_ids.append(f"{base_id}_{i:06d}")
+            
+        # Fetch from Qdrant
+        retriever = get_retriever()
+        chunks = retriever.vec.get_chunks_by_ids(target_ids)
+        return chunks
+    except Exception as e:
+        logger.warning(f"Failed to get adjacent chunks: {e}")
+        return []
 
 def query_document(
     doc_identifier: str | int,

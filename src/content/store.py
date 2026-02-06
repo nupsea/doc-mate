@@ -125,6 +125,7 @@ class PgresStore:
         num_chunks: int = None,
         num_chars: int = None,
         metadata: dict = None,
+        is_ephemeral: bool = False,
     ) -> int:
         """
         Store any document type (books, scripts, conversations, etc).
@@ -137,6 +138,7 @@ class PgresStore:
             num_chunks: Number of chunks created
             num_chars: Total character count
             metadata: Type-specific metadata (stored as JSONB)
+            is_ephemeral: Whether document is ephemeral (default False)
 
         Returns:
             doc_id (document ID)
@@ -147,19 +149,20 @@ class PgresStore:
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO documents (slug, title, author, num_chunks, num_chars, doc_type, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO documents (slug, title, author, num_chunks, num_chars, doc_type, metadata, is_ephemeral)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (slug) DO UPDATE
                 SET title = excluded.title,
                     author = excluded.author,
                     num_chunks = excluded.num_chunks,
                     num_chars = excluded.num_chars,
                     doc_type = excluded.doc_type,
-                    metadata = excluded.metadata
+                    metadata = excluded.metadata,
+                    is_ephemeral = excluded.is_ephemeral
                 RETURNING doc_id
                 """,
                 (slug, title, author, num_chunks, num_chars, doc_type,
-                 json.dumps(clean_metadata)),
+                 json.dumps(clean_metadata), is_ephemeral),
             )
             doc_id = cur.fetchone()[0]
         self.conn.commit()
