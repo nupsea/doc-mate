@@ -55,8 +55,22 @@ DOC_PARAMS = {
 
 
 class SummaryGenerator:
-    def __init__(self, doc_type: str = 'book'):
-        self.client = AsyncOpenAI()
+    def __init__(self, doc_type: str = 'book', provider: str = None):
+        from src.llm.config import LLMConfig
+        self.config = LLMConfig.from_env()
+        self.provider = provider or self.config.default_provider
+        
+        if self.provider == "local" or self.config.privacy_mode:
+            # Ensure /v1 for OpenAI-compatible API
+            base_url = self.config.ollama_base_url
+            if "/v1" not in base_url:
+                base_url = base_url.rstrip("/") + "/v1"
+            self.client = AsyncOpenAI(base_url=base_url, api_key="ollama")
+            self.model = self.config.ollama_model
+        else:
+            self.client = AsyncOpenAI(api_key=self.config.openai_api_key)
+            self.model = "gpt-4o-mini"
+
         # RATE LIMIT FIX: Reduce concurrency from 4 -> 2 to avoid TPM 429 errors
         self.semaphore = asyncio.Semaphore(2)
         self.doc_type = doc_type
@@ -113,7 +127,7 @@ class SummaryGenerator:
                 try:
                     prompt = self.section_prompt.format(text=text)
                     resp = await self.client.chat.completions.create(
-                        model="gpt-4o-mini",  # fast + cheap
+                        model=self.model,  # fast + cheap
                         messages=[{"role": "user", "content": prompt}],
                         temperature=0.3,
                         timeout=120.0 # Prevent timeouts on large contexts
@@ -176,7 +190,7 @@ Combine them into 1-2 cohesive paragraphs that capture the key points.
 {combined_text}
 """
                         resp = await self.client.chat.completions.create(
-                            model="gpt-4o-mini",
+                            model=self.model,
                             messages=[{"role": "user", "content": prompt}],
                             temperature=0.3,
                         )
@@ -214,7 +228,7 @@ Combine them into 1-2 cohesive paragraphs that capture the key points.
                 try:
                     async with self.semaphore:
                         resp = await self.client.chat.completions.create(
-                            model="gpt-4o-mini",  # Use mini for cost efficiency
+                            model=self.model,  # Use mini for cost efficiency
                             messages=[{"role": "user", "content": prompt}],
                             temperature=0.3,
                         )
@@ -234,7 +248,7 @@ Combine them into 1-2 cohesive paragraphs that capture the key points.
                     # Simple call - in a real scenario we'd use retry here too
                     # But for now, relying on lower concurrency to save us
                     resp = await self.client.chat.completions.create(
-                        model="gpt-4o-mini",
+                        model=self.model,
                         messages=[{"role": "user", "content": prompt}],
                         temperature=0.3,
                     )

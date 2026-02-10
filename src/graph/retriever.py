@@ -1,6 +1,7 @@
 from typing import List, Dict, Any
 import logging
 import re
+import numpy as np
 from src.graph.store import PostgresGraphStore
 
 logger = logging.getLogger(__name__)
@@ -10,18 +11,38 @@ class GraphRetriever:
     Retrieves chunks based on graph traversal.
     """
     
-    def __init__(self):
+    def __init__(self, embedder=None):
         self.store = PostgresGraphStore()
+        self._embedder = embedder # Optional shared embedder
+
+    @property
+    def embedder(self):
+        """Lazy load embedder to avoid heavy init if not needed."""
+        if self._embedder is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+                logger.info("[GRAPH] Loading SentenceTransformer for entity semantic search...")
+                self._embedder = SentenceTransformer("BAAI/bge-small-en", device="cpu")
+            except ImportError:
+                logger.warning("[GRAPH] sentence-transformers not available. Semantic search disabled.")
+        return self._embedder
 
     def _extract_query_entities(self, query: str, doc_id: int, hint_entities: List[str] = None) -> List[int]:
         """
         Identify entities in the query by matching against known entities in the graph.
+        Uses:
+        1. Exact/Substring name matching
+        2. Semantic matching against entity descriptions (Phase 4)
         Returns list of entity_ids.
         """
-        # Fetch all entity names for this doc
-        with self.store.conn.cursor() as cur:
-            cur.execute("SELECT name, entity_id FROM graph_entities WHERE doc_id = %s", (doc_id,))
-            rows = cur.fetchall()
+        # Fetch all entities for this doc
+        rows = self.store.execute(
+            "SELECT name, entity_id, description FROM graph_entities WHERE doc_id = %s",
+            (doc_id,),
+            fetch="all"
+        )
+        if not rows:
+            return []
             
         found_ids = []
         query_lower = query.lower()
@@ -33,22 +54,45 @@ class GraphRetriever:
         if hint_entities:
             query_words.update(w.lower() for w in hint_entities)
         
-        for name, eid in rows:
+        # 1. Exact / Word matching
+        for name, eid, desc in rows:
             name_lower = name.lower()
             name_words = set(re.findall(r'\w+', name_lower))
             
-            # Match if:
-            # 1. Full name is in query
             if name_lower in query_lower:
                 found_ids.append(eid)
                 continue
                 
-            # 2. Any significant word from the query matches the entity name
             matching_words = query_words.intersection(name_words)
             significant_matches = [w for w in matching_words if len(w) > 3]
             
             if significant_matches:
                 found_ids.append(eid)
+        
+        # If we didn't find many entities or for extra recall
+        if self.embedder and len(found_ids) < 3:
+            try:
+                # Filter rows that have descriptions
+                desc_rows = [(eid, name, desc) for name, eid, desc in rows if desc and len(desc) > 10]
+                if desc_rows:
+                    descriptions = [r[2] for r in desc_rows]
+                    # Embed query and descriptions
+                    query_vec = self.embedder.encode([query], normalize_embeddings=True)[0]
+                    desc_vecs = self.embedder.encode(descriptions, normalize_embeddings=True)
+                    
+                    # Compute cosine similarity
+                    similarities = np.dot(desc_vecs, query_vec)
+                    
+                    # Pick top matches above threshold
+                    THRESHOLD = 0.65
+                    for i, sim in enumerate(similarities):
+                        if sim > THRESHOLD:
+                            eid = desc_rows[i][0]
+                            if eid not in found_ids:
+                                logger.info(f"[GRAPH] Semantic match: '{desc_rows[i][1]}' (score: {sim:.2f})")
+                                found_ids.append(eid)
+            except Exception as e:
+                logger.warning(f"[GRAPH] Entity semantic matching failed: {e}")
                 
         return found_ids
 
@@ -82,16 +126,17 @@ class GraphRetriever:
         query_lower = query.lower()
         for term, rel_types in kinship_terms.items():
             if term in query_lower:
-                with self.store.conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT DISTINCT source_entity_id, target_entity_id
-                        FROM graph_relationships
-                        WHERE doc_id = %s AND relation_type = ANY(%s)
-                        """,
-                        (doc_id, rel_types)
-                    )
-                    for row in cur.fetchall():
+                rows = self.store.execute(
+                    """
+                    SELECT DISTINCT source_entity_id, target_entity_id
+                    FROM graph_relationships
+                    WHERE doc_id = %s AND relation_type = ANY(%s)
+                    """,
+                    (doc_id, rel_types),
+                    fetch="all"
+                )
+                if rows:
+                    for row in rows:
                         if row[0] not in entity_ids: 
                             entity_ids.append(row[0])
                         if row[1] not in entity_ids:
@@ -147,28 +192,26 @@ class ConversationGraphRetriever(GraphRetriever):
         # 2. Episode Search
         # Match query text against episode topics, speakers, or summaries
         # This is a bit brute-force SQL ILIKE, but efficient for reasonable doc sizes
-        with self.store.conn.cursor() as cur:
-            # Simple keyword matching for speaker or topic
-            # e.g. "What did Alice say about the budget?"
-            cur.execute(
-                """
-                SELECT source_chunk_ids, speaker, topic 
-                FROM graph_episodes 
-                WHERE doc_id = %s 
-                AND (
-                    %s ILIKE '%%' || speaker || '%%' 
-                    OR %s ILIKE '%%' || topic || '%%'
-                )
-                """,
-                (doc_id, query, query)
+        rows = self.store.execute(
+            """
+            SELECT source_chunk_ids, speaker, topic 
+            FROM graph_episodes 
+            WHERE doc_id = %s 
+            AND (
+                %s ILIKE '%%' || speaker || '%%' 
+                OR %s ILIKE '%%' || topic || '%%'
             )
-            rows = cur.fetchall()
+            """,
+            (doc_id, query, query),
+            fetch="all"
+        )
             
         episode_chunk_scores = {}
-        for row in rows:
-            chunk_ids = row[0]
-            for cid in chunk_ids:
-                episode_chunk_scores[cid] = episode_chunk_scores.get(cid, 0) + 2.0  # High weight for episode match
+        if rows:
+            for row in rows:
+                chunk_ids = row[0]
+                for cid in chunk_ids:
+                    episode_chunk_scores[cid] = episode_chunk_scores.get(cid, 0) + 2.0  # High weight for episode match
                 
         # 3. Merge Results
         final_scores = {r["id"]: r["score"] for r in base_results}

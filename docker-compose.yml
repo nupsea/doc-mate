@@ -79,7 +79,7 @@ services:
       QDRANT_PORT: 6333
       PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:4317
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-granite3.2:8b}
       PRIVACY_MODE: ${PRIVACY_MODE:-false}
     ports:

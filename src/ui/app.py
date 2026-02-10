@@ -10,6 +10,7 @@ from src.ui.chat import create_chat_interface
 from src.ui.ingest import create_ingest_interface
 from src.ui.monitoring import create_monitoring_interface
 from src.flows.document_query import preload_retriever
+from src.content.db import DatabaseManager
 
 # NOTE: Phoenix tracing is initialized on-demand in BookMateUI.__init__
 # to respect ephemeral mode flags. Do NOT initialize here at module load.
@@ -92,22 +93,23 @@ class DocMateUI:
 
                 try:
                     store = PgresStore()
-                    with store.conn.cursor() as cur:
-                        cur.execute(
-                            "SELECT title FROM documents WHERE slug = %s", (selected_doc,)
-                        )
-                        result = cur.fetchone()
-                        if result:
-                            doc_title = result[0]
-                            print(
-                                f"[UI] Found document title for slug '{selected_doc}': {doc_title}"
+                    with store._get_conn() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                "SELECT title FROM documents WHERE slug = %s", (selected_doc,)
                             )
-                            # Only inject if not already mentioned
-                            if doc_title.lower() not in message.lower():
-                                message = f"{message} (for the document '{doc_title}')"
-                                print(f"[UI] Injected title into message: {message}")
-                            else:
-                                print("[UI] Title already in message, not injecting")
+                            result = cur.fetchone()
+                            if result:
+                                doc_title = result[0]
+                                print(
+                                    f"[UI] Found document title for slug '{selected_doc}': {doc_title}"
+                                )
+                                # Only inject if not already mentioned
+                                if doc_title.lower() not in message.lower():
+                                    message = f"{message} (for the document '{doc_title}')"
+                                    print(f"[UI] Injected title into message: {message}")
+                                else:
+                                    print("[UI] Title already in message, not injecting")
                 except Exception as e:
                     print(f"[WARN] Could not get document title: {e}")
             else:
@@ -140,6 +142,9 @@ class DocMateUI:
 
 def create_app():
     """Create the main Gradio application."""
+    # Initialize DB Pool
+    DatabaseManager.get_pool()
+    
     from src.ui.utils import get_available_documents, format_document_list
 
     # Preload retriever in background to avoid delay on first query

@@ -2,7 +2,6 @@
 Test ephemeral and internal modes
 """
 import pytest
-import asyncio
 import os
 import io
 from contextlib import redirect_stdout, redirect_stderr

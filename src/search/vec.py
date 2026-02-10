@@ -55,35 +55,42 @@ class SemanticRetriever:
         vecs = self.embedder.encode(texts, normalize_embeddings=True).tolist()
         return vecs
 
-    def build_index(self, chunks):
-
-        vectors = self.embed_batch(chunks)
-        logger.info("Vector shape: %d x %d", len(vectors), len(vectors[0]))
-
+    def build_index(self, chunks, batch_size=50):
         if not self.qdrant.collection_exists(SemanticRetriever.COLLECTION):
+            # Create collection with dummy vector to get size if needed, 
+            # but better to infer from first batch
+            sample_vec = self.embed_batch(chunks[:1])[0]
             self.qdrant.create_collection(
                 collection_name=SemanticRetriever.COLLECTION,
                 vectors_config=models.VectorParams(
-                    size=len(vectors[0]), distance=models.Distance.COSINE
+                    size=len(sample_vec), distance=models.Distance.COSINE
                 ),
             )
 
-        # Upsert points using chunk ID hash for unique identification
         import hashlib
+        total_chunks = len(chunks)
+        logger.info(f"Indexing {total_chunks} chunks into Qdrant in batches of {batch_size}...")
 
-        self.qdrant.upsert(
-            collection_name=SemanticRetriever.COLLECTION,
-            points=[
+        for i in range(0, total_chunks, batch_size):
+            batch = chunks[i : i + batch_size]
+            vectors = self.embed_batch(batch)
+            
+            points = [
                 models.PointStruct(
-                    id=int(hashlib.md5(chunks[i]["id"].encode()).hexdigest()[:16], 16)
-                    % (10**9),
-                    vector=vectors[i],
-                    payload=chunks[i],
+                    id=int(hashlib.md5(c["id"].encode()).hexdigest()[:16], 16) % (10**9),
+                    vector=vec,
+                    payload=c,
                 )
-                for i in range(len(chunks))
-            ],
-        )
-        logger.info("Inserted %d chunks into Qdrant", len(chunks))
+                for c, vec in zip(batch, vectors)
+            ]
+            
+            self.qdrant.upsert(
+                collection_name=SemanticRetriever.COLLECTION,
+                points=points,
+            )
+            logger.info(f"Indexed chunks {i + 1} to {min(i + batch_size, total_chunks)} / {total_chunks}")
+
+        logger.info("Vector indexing complete.")
 
     def search(self, query, topk=7, doc_slug=None):
         if not self.qdrant.collection_exists(SemanticRetriever.COLLECTION):

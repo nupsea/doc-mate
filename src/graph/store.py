@@ -53,25 +53,25 @@ class PostgresGraphStore(PgresStore):
             for e in unique_entities.values()
         ]
 
-        with self.conn.cursor() as cur:
-            execute_values(
-                cur,
-                """
-                INSERT INTO graph_entities (doc_id, name, entity_type, description, metadata, source_chunk_ids)
-                VALUES %s
-                ON CONFLICT (doc_id, name, entity_type) 
-                DO UPDATE SET
-                    description = COALESCE(excluded.description, graph_entities.description),
-                    metadata = graph_entities.metadata || excluded.metadata,
-                    source_chunk_ids = (
-                        SELECT array_agg(DISTINCT x) 
-                        FROM unnest(graph_entities.source_chunk_ids || excluded.source_chunk_ids) AS x
-                    )
-                """,
-                rows
-            )
-        
-        self.conn.commit()
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                execute_values(
+                    cur,
+                    """
+                    INSERT INTO graph_entities (doc_id, name, entity_type, description, metadata, source_chunk_ids)
+                    VALUES %s
+                    ON CONFLICT (doc_id, name, entity_type) 
+                    DO UPDATE SET
+                        description = COALESCE(excluded.description, graph_entities.description),
+                        metadata = graph_entities.metadata || excluded.metadata,
+                        source_chunk_ids = (
+                            SELECT array_agg(DISTINCT x) 
+                            FROM unnest(graph_entities.source_chunk_ids || excluded.source_chunk_ids) AS x
+                        )
+                    """,
+                    rows
+                )
+            conn.commit()
 
         # After storing, fetch ALL entity IDs for this document to ensure stats are accurate
         # and IDs are available for relationship resolution.
@@ -154,27 +154,27 @@ class PostgresGraphStore(PgresStore):
         if not rows:
             return 0
 
-        with self.conn.cursor() as cur:
-            execute_values(
-                cur,
-                """
-                INSERT INTO graph_relationships 
-                (doc_id, source_entity_id, target_entity_id, relation_type, weight, description, metadata, source_chunk_ids)
-                VALUES %s
-                ON CONFLICT (doc_id, source_entity_id, target_entity_id, relation_type) 
-                DO UPDATE SET
-                    weight = graph_relationships.weight + EXCLUDED.weight,
-                    description = COALESCE(graph_relationships.description, EXCLUDED.description),
-                    source_chunk_ids = (
-                        SELECT array_agg(DISTINCT x) 
-                        FROM unnest(graph_relationships.source_chunk_ids || EXCLUDED.source_chunk_ids) AS x
-                    )
-                """,
-                rows
-            )
-            count = cur.rowcount
-        
-        self.conn.commit()
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                execute_values(
+                    cur,
+                    """
+                    INSERT INTO graph_relationships 
+                    (doc_id, source_entity_id, target_entity_id, relation_type, weight, description, metadata, source_chunk_ids)
+                    VALUES %s
+                    ON CONFLICT (doc_id, source_entity_id, target_entity_id, relation_type) 
+                    DO UPDATE SET
+                        weight = graph_relationships.weight + EXCLUDED.weight,
+                        description = COALESCE(graph_relationships.description, EXCLUDED.description),
+                        source_chunk_ids = (
+                            SELECT array_agg(DISTINCT x) 
+                            FROM unnest(graph_relationships.source_chunk_ids || EXCLUDED.source_chunk_ids) AS x
+                        )
+                    """,
+                    rows
+                )
+                count = cur.rowcount
+            conn.commit()
         return count
 
     def store_episodes(self, doc_id: int, episodes: List[Episode]) -> int:
@@ -205,19 +205,19 @@ class PostgresGraphStore(PgresStore):
             for ep in episodes
         ]
 
-        with self.conn.cursor() as cur:
-            execute_values(
-                cur,
-                """
-                INSERT INTO graph_episodes 
-                (doc_id, speaker, stance, topic, summary, turn_start, turn_end, timestamp_start, timestamp_end, entity_ids, source_chunk_ids, metadata)
-                VALUES %s
-                """,
-                rows
-            )
-            count = cur.rowcount
-        
-        self.conn.commit()
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                execute_values(
+                    cur,
+                    """
+                    INSERT INTO graph_episodes 
+                    (doc_id, speaker, stance, topic, summary, turn_start, turn_end, timestamp_start, timestamp_end, entity_ids, source_chunk_ids, metadata)
+                    VALUES %s
+                    """,
+                    rows
+                )
+                count = cur.rowcount
+            conn.commit()
         return count
 
     def find_entities_by_names(self, doc_id: int, names: List[str]) -> Dict[str, int]:
@@ -230,17 +230,12 @@ class PostgresGraphStore(PgresStore):
             
         # Normalize names to lower for search
         search_names = [n.lower() for n in names]
-            
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT name, entity_id 
-                FROM graph_entities 
-                WHERE doc_id = %s AND LOWER(name) = ANY(%s)
-                """,
-                (doc_id, search_names)
-            )
-            return {row[0]: row[1] for row in cur.fetchall()}
+        rows = self.execute(
+            "SELECT name, entity_id FROM graph_entities WHERE doc_id = %s AND LOWER(name) = ANY(%s)",
+            (doc_id, search_names),
+            fetch="all"
+        )
+        return {row[0]: row[1] for row in rows} if rows else {}
 
     def find_docs_by_entities(self, names: List[str]) -> List[str]:
         """
@@ -251,99 +246,95 @@ class PostgresGraphStore(PgresStore):
             return []
             
         search_names = [n.lower() for n in names]
-        
-        with self.conn.cursor() as cur:
-            # Join with documents table to get slugs
-            # Use DISTINCT to avoid duplicates if entity appears multiple times
-            cur.execute(
-                """
-                SELECT DISTINCT d.slug
-                FROM graph_entities ge
-                JOIN documents d ON ge.doc_id = d.doc_id
-                WHERE LOWER(ge.name) = ANY(%s)
-                """,
-                (search_names,)
-            )
-            return [row[0] for row in cur.fetchall()]
+        rows = self.execute(
+            """
+            SELECT DISTINCT d.slug
+            FROM graph_entities ge
+            JOIN documents d ON ge.doc_id = d.doc_id
+            WHERE LOWER(ge.name) = ANY(%s)
+            """,
+            (search_names,),
+            fetch="all"
+        )
+        return [row[0] for row in rows] if rows else []
 
     def find_related_entities(self, entity_id: int, hops: int = 2) -> List[Dict[str, Any]]:
         """
         Find entities related to the given entity_id within 'hops' distance.
         Uses recursive CTE for graph traversal.
         """
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                WITH RECURSIVE graph_walk AS (
-                    -- Base case: Direct neighbors (Hop 1)
-                    SELECT 
-                        CASE 
-                            WHEN r.source_entity_id = %s THEN r.target_entity_id
-                            ELSE r.source_entity_id 
-                        END AS entity_id,
-                        r.relation_type,
-                        1 AS depth
-                    FROM graph_relationships r
-                    WHERE r.source_entity_id = %s OR r.target_entity_id = %s
+        rows = self.execute(
+            """
+            WITH RECURSIVE graph_walk AS (
+                -- Base case: Direct neighbors (Hop 1)
+                SELECT 
+                    CASE 
+                        WHEN r.source_entity_id = %s THEN r.target_entity_id
+                        ELSE r.source_entity_id 
+                    END AS entity_id,
+                    r.relation_type,
+                    1 AS depth
+                FROM graph_relationships r
+                WHERE r.source_entity_id = %s OR r.target_entity_id = %s
 
-                    UNION ALL
+                UNION ALL
 
-                    -- Recursive step: Neighbors of neighbors (Hop N)
-                    SELECT 
-                        CASE 
-                            WHEN r2.source_entity_id = gw.entity_id THEN r2.target_entity_id
-                            ELSE r2.source_entity_id 
-                        END AS entity_id,
-                        r2.relation_type,
-                        gw.depth + 1
-                    FROM graph_walk gw
-                    JOIN graph_relationships r2 ON r2.source_entity_id = gw.entity_id OR r2.target_entity_id = gw.entity_id
-                    WHERE gw.depth < %s
-                )
-                SELECT DISTINCT 
-                    e.entity_id, 
-                    e.name, 
-                    e.entity_type, 
-                    e.description,
-                    gw.relation_type, 
-                    gw.depth,
-                    e.source_chunk_ids
+                -- Recursive step: Neighbors of neighbors (Hop N)
+                SELECT 
+                    CASE 
+                        WHEN r2.source_entity_id = gw.entity_id THEN r2.target_entity_id
+                        ELSE r2.source_entity_id 
+                    END AS entity_id,
+                    r2.relation_type,
+                    gw.depth + 1
                 FROM graph_walk gw
-                JOIN graph_entities e ON e.entity_id = gw.entity_id
-                WHERE e.entity_id != %s
-                ORDER BY gw.depth, e.name
-                """,
-                (entity_id, entity_id, entity_id, hops, entity_id)
+                JOIN graph_relationships r2 ON r2.source_entity_id = gw.entity_id OR r2.target_entity_id = gw.entity_id
+                WHERE gw.depth < %s
             )
+            SELECT DISTINCT 
+                e.entity_id, 
+                e.name, 
+                e.entity_type, 
+                e.description,
+                gw.relation_type, 
+                gw.depth,
+                e.source_chunk_ids
+            FROM graph_walk gw
+            JOIN graph_entities e ON e.entity_id = gw.entity_id
+            WHERE e.entity_id != %s
+            ORDER BY gw.depth, e.name
+            """,
+            (entity_id, entity_id, entity_id, hops, entity_id),
+            fetch="all"
+        )
+        
+        if not rows:
+            return []
             
-            results = []
-            for row in cur.fetchall():
-                results.append({
-                    "entity_id": row[0],
-                    "name": row[1],
-                    "entity_type": row[2],
-                    "description": row[3],
-                    "relation_type": row[4],
-                    "depth": row[5],
-                    "source_chunk_ids": row[6]
-                })
-            return results
+        results = []
+        for row in rows:
+            results.append({
+                "entity_id": row[0],
+                "name": row[1],
+                "entity_type": row[2],
+                "description": row[3],
+                "relation_type": row[4],
+                "depth": row[5],
+                "source_chunk_ids": row[6]
+            })
+        return results
 
     def get_chunk_ids_for_entities(self, entity_ids: List[int]) -> List[str]:
         """Collect all source_chunk_ids associated with a list of entities."""
         if not entity_ids:
             return []
             
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT DISTINCT unnest(source_chunk_ids)
-                FROM graph_entities
-                WHERE entity_id = ANY(%s)
-                """,
-                (entity_ids,)
-            )
-            return [row[0] for row in cur.fetchall()]
+        rows = self.execute(
+            "SELECT DISTINCT unnest(source_chunk_ids) FROM graph_entities WHERE entity_id = ANY(%s)",
+            (entity_ids,),
+            fetch="all"
+        )
+        return [row[0] for row in rows] if rows else []
 
     def delete_graph_for_doc(self, doc_id: int):
         """
@@ -351,8 +342,39 @@ class PostgresGraphStore(PgresStore):
         (Note: Cascade delete on documents table usually handles this, 
         but this is useful for re-ingestion).
         """
-        with self.conn.cursor() as cur:
-            cur.execute("DELETE FROM graph_entities WHERE doc_id = %s", (doc_id,))
-            # Relationships and Episodes cascade or can be deleted manually if needed
-            cur.execute("DELETE FROM graph_episodes WHERE doc_id = %s", (doc_id,))
-        self.conn.commit()
+        self.execute("DELETE FROM graph_entities WHERE doc_id = %s", (doc_id,), commit=True)
+        self.execute("DELETE FROM graph_episodes WHERE doc_id = %s", (doc_id,), commit=True)
+
+    def get_episodes_for_doc(self, slug: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        Fetch recent episodes for a document (conversation).
+        Useful for providing high-level conversation flow context.
+        """
+        doc_id = self._resolve_doc_id(slug)
+        if not doc_id:
+            return []
+
+        rows = self.execute(
+            """
+            SELECT topic, summary, speaker, stance 
+            FROM graph_episodes 
+            WHERE doc_id = %s 
+            ORDER BY turn_start ASC 
+            LIMIT %s
+            """,
+            (doc_id, limit),
+            fetch="all"
+        )
+        
+        if not rows:
+            return []
+            
+        episodes = []
+        for row in rows:
+            episodes.append({
+                "topic": row[0],
+                "summary": row[1],
+                "speaker": row[2],
+                "stance": row[3]
+            })
+        return episodes

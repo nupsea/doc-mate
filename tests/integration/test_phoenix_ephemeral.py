@@ -2,7 +2,6 @@
 Test that Phoenix tracing is completely disabled in ephemeral mode
 """
 import pytest
-import asyncio
 import os
 from src.mcp_client.agent import BookMateAgent
 from src.monitoring.tracer import is_phoenix_enabled

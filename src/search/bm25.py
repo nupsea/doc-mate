@@ -19,27 +19,36 @@ class BM25Retriever:
         self.b = b
         self.store = PgresStore()
 
-    def build_index(self, chunks):
+    def build_index(self, chunks, batch_size=100):
         """
-        Build BM25 index from chunks and store in DB.
+        Build BM25 index from chunks and store in DB in batches.
         """
-        term_freqs = []
-        doc_lens = []
+        total_chunks = len(chunks)
+        logger.info(f"Building BM25 index for {total_chunks} chunks in batches of {batch_size}...")
 
-        for chunk in chunks:
-            chunk_id = chunk["id"]
-            tokens = simple_tokenize(chunk["text"])
-            doc_len = len(tokens)
-            doc_lens.append((chunk_id, doc_len))
+        for i in range(0, total_chunks, batch_size):
+            batch = chunks[i : i + batch_size]
+            term_freqs = []
+            doc_lens = []
+
+            for chunk in batch:
+                chunk_id = chunk["id"]
+                tokens = simple_tokenize(chunk["text"])
+                doc_len = len(tokens)
+                doc_lens.append((chunk_id, doc_len))
+                
+                # Count term frequencies for this chunk
+                freqs = Counter(tokens)
+                for term, freq in freqs.items():
+                    term_freqs.append((term, chunk_id, freq))
+
+            # Store batch in DB
+            if term_freqs:
+                self.store.store_bm25_index(term_freqs, doc_lens)
             
-            # Count term frequencies for this chunk
-            freqs = Counter(tokens)
-            for term, freq in freqs.items():
-                term_freqs.append((term, chunk_id, freq))
+            logger.info(f"Stored BM25 index for chunks {i+1}-{min(i+batch_size, total_chunks)}")
 
-        # Store in DB
-        self.store.store_bm25_index(term_freqs, doc_lens)
-        logger.info(f"Built and stored BM25 index for {len(chunks)} chunks")
+        logger.info("BM25 indexing complete.")
 
     def score(self, query_tokens, chunk_id, tf, doc_len, df, N, avgdl):
         score = 0.0

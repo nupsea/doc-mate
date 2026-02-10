@@ -100,7 +100,7 @@ def read_and_parse(
     }
 
 
-async def generate_summaries(chunks: list, doc_type: str = 'book', ephemeral: bool = False):
+async def generate_summaries(chunks: list, doc_type: str = 'book', ephemeral: bool = False, slug: str = None):
     """Generate chapter and document summaries."""
     from src.monitoring.tracer import disable_tracing, init_phoenix_tracing, is_phoenix_enabled
 
@@ -113,6 +113,9 @@ async def generate_summaries(chunks: list, doc_type: str = 'book', ephemeral: bo
     try:
         gen = SummaryGenerator(doc_type=doc_type)
         chapter_summaries, document_summary = await gen.summarize_hierarchy(chunks)
+        
+        if slug:
+            store_summaries_to_db(slug, chapter_summaries, document_summary)
 
         return {
             "chapter_summaries": chapter_summaries,
@@ -125,20 +128,18 @@ async def generate_summaries(chunks: list, doc_type: str = 'book', ephemeral: bo
             print("[EPHEMERAL] Re-enabling Phoenix tracing...")
             init_phoenix_tracing()
 
-def store_to_db(
+def store_document_metadata(
     slug: str,
     title: str,
     author: str,
     num_chunks: int,
     num_chars: int,
-    chapter_summaries: list,
-    document_summary: str,
     doc_type: str = 'book',
     metadata: dict = None,
     force_update: bool = False,
     is_ephemeral: bool = False,
 ):
-    """Store document metadata and summaries to database."""
+    """Store document metadata to database."""
     store = PgresStore()
 
     if force_update and store.document_exists(slug):
@@ -155,26 +156,27 @@ def store_to_db(
         metadata=metadata,
         is_ephemeral=is_ephemeral
     )
+    return {"doc_id": doc_id, "slug": slug}
 
-    # Store summaries (works for all doc types)
+def store_summaries_to_db(slug: str, chapter_summaries: list, document_summary: str):
+    """Store document summaries to database."""
+    store = PgresStore()
     if chapter_summaries and document_summary:
         store.store_summaries(slug, chapter_summaries, document_summary)
 
-    return {"doc_id": doc_id, "slug": slug}
-
-def build_search_indexes(chunks: list):
-    """Build BM25 and vector search indexes (append to existing indexes)."""
+async def build_search_indexes(chunks: list):
+    """Build BM25 and vector search indexes in parallel."""
     retriever = FusionRetriever()
 
-    # Rebuild BM25 with all chunks (database handles storage)
-    # Note: We just pass the chunks to build_index, the retriever handles the DB interaction
-    retriever.bm25.build_index(chunks)
-    
-    # Build vector index for new chunks only (Qdrant handles appending)
-    retriever.vec.build_index(chunks)
+    # Run BM25 and Vector indexing concurrently
+    # Both methods now handle batching internally
+    await asyncio.gather(
+        asyncio.to_thread(retriever.bm25.build_index, chunks),
+        asyncio.to_thread(retriever.vec.build_index, chunks)
+    )
 
     return {
-        "bm25_indexed": len(chunks), # BM25 is updated with these chunks
+        "bm25_indexed": len(chunks),
         "vector_indexed": len(chunks),
         "new_chunks": len(chunks),
     }
@@ -326,34 +328,38 @@ async def ingest_document(
         except Exception:
             metadata = {}
 
-    # Generate summaries (for all types)
-    summary_result = await generate_summaries(parse_result["chunks"], doc_type=doc_type, ephemeral=ephemeral)
-    print(
-        f"Generated {summary_result['num_chapters']} section summaries + overall summary"
-    )
-
-    db_result = store_to_db(
+    # Store initial metadata to get doc_id for graph
+    db_result = store_document_metadata(
         slug,
         title,
         author,
         parse_result["num_chunks"],
         parse_result["num_chars"],
-        summary_result["chapter_summaries"],
-        summary_result["document_summary"],
         doc_type,
         metadata,
         force_update,
-        is_ephemeral=ephemeral # Pass the flag to DB
+        is_ephemeral=ephemeral
     )
-    print(f"Stored to database - Document ID: {db_result['doc_id']}")
+    print(f"Stored metadata to database - Document ID: {db_result['doc_id']}")
 
-    search_result = build_search_indexes(parse_result["chunks"])
+    # Run Summaries (LLM), Search (CPU/IO), and Graph (LLM) in PARALLEL
+    # SummaryGenerator handles its own semaphore (2 concurrent)
+    # EntityExtractor handles its own semaphore (2 concurrent)
+    # Search indexing handles its own threads
+    print("[INGEST] Starting parallel execution: Summaries | Search Indexes | Knowledge Graph...")
+    
+    summary_result, search_result, graph_stats = await asyncio.gather(
+        generate_summaries(parse_result["chunks"], doc_type=doc_type, ephemeral=ephemeral, slug=slug),
+        build_search_indexes(parse_result["chunks"]),
+        build_graph_index(parse_result["chunks"], db_result["doc_id"], doc_type, ephemeral=ephemeral)
+    )
+    
+    print(
+        f"Generated {summary_result['num_chapters']} section summaries + overall summary"
+    )
     print(
         f"Built search indexes - BM25: {search_result['bm25_indexed']}, Vector: {search_result['vector_indexed']} chunks"
     )
-
-    # Build Graph Index
-    graph_stats = await build_graph_index(parse_result["chunks"], db_result["doc_id"], doc_type, ephemeral=ephemeral)
     print(f"Built Knowledge Graph - Entities: {graph_stats['entities']}, Relations: {graph_stats['relationships']}")
 
     verify_result = verify_ingestion(slug, summary_result["num_chapters"])

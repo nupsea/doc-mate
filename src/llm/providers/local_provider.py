@@ -46,7 +46,14 @@ class LocalProvider(LLMProvider):
 
         Default: granite3.2:8b (optimized for RAG + tool calling)
         """
-        self.base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        raw_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        
+        # Ensure /v1 suffix for OpenAI-compatible API
+        if "/v1" not in raw_url:
+            self.base_url = raw_url.rstrip("/") + "/v1"
+        else:
+            self.base_url = raw_url
+
         self.model = model
         self.timeout = timeout
         self.max_concurrent_requests = max_concurrent_requests

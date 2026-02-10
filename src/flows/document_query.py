@@ -184,10 +184,8 @@ def search_document_content(query: str, doc_identifier: str | int, limit: int = 
 
         # Apply diversity filtering for conversation documents
         # This prevents repetitive results from the same time window/speaker
-        with store.conn.cursor() as cur:
-            cur.execute("SELECT doc_type FROM documents WHERE doc_id = %s", (doc_id,))
-            result_row = cur.fetchone()
-            doc_type = result_row[0] if result_row else None
+        row = store.execute("SELECT doc_type FROM documents WHERE doc_id = %s", (doc_id,), fetch="one")
+        doc_type = row[0] if row else None
 
         if doc_type == "conversation" and len(chunks_with_text) > 5:
             logger.debug("Applying diversity filtering for conversation document")
@@ -233,38 +231,68 @@ def get_document_summary(doc_identifier: str | int):
     return {"summary": summary, "length": len(summary) if summary else 0}
 
 
-def get_adjacent_chunks(doc_slug: str, chunk_id: str, window: int = 2) -> list[dict]:
+def get_adjacent_chunks(doc_slug: str, chunk_id: str, before: int = 1, after: int = 1) -> list[dict]:
     """
     Fetch adjacent chunks (before and after) based on chunk_id sequence.
     Useful for expanding conversation context.
+    
+    Args:
+        doc_slug: Slug of the document
+        chunk_id: The pivot chunk ID
+        before: Number of chunks to fetch before
+        after: Number of chunks to fetch after
     """
     try:
-        # Assuming chunk_ids are sequential like "slug_01_001", "slug_01_002"
-        # We can reconstruct IDs or use a DB lookup if chunks are stored with order.
-        # For now, we'll try a Qdrant ID lookup pattern if possible, or fall back to DB.
-        
-        # Parse the ID to get the index
-        # Format: {slug}_chk_{index} or similar. Let's assume standard format.
-        parts = chunk_id.rsplit('_', 1)
-        if len(parts) != 2 or not parts[1].isdigit():
+        # Assuming chunk_ids are sequential like "slug_01_001_hash"
+        # Format: {slug}_{section}_{index}_{hash}
+        parts = chunk_id.split('_')
+        if len(parts) < 3:
             return []
             
-        base_id = parts[0]
-        current_idx = int(parts[1])
-        
-        target_ids = []
-        for i in range(current_idx - window, current_idx + window + 1):
-            if i == current_idx or i < 0:
-                continue
-            # Zero-pad the index to match 6-digit standard (e.g., 000012)
-            target_ids.append(f"{base_id}_{i:06d}")
+        slug = parts[0]
+        section = parts[1]
             
+        # We need the prefix to rebuild IDs
+        # Note: hash part is unique to each chunk, so we can't easily guess it.
+        # INSTEAD: In the DB-backed world, we can query BM25_doc_lens for sequential IDs.
+        
+        store = PgresStore()
+        # Fetch IDs in the same section, sorted by ID
+        rows = store.execute(
+            "SELECT chunk_id FROM bm25_doc_lens WHERE chunk_id LIKE %s ORDER BY chunk_id",
+            (f"{slug}_{section}_%",),
+            fetch="all"
+        )
+        
+        if not rows:
+            return []
+            
+        all_ids = [row[0] for row in rows]
+        try:
+            pivot_idx = all_ids.index(chunk_id)
+        except ValueError:
+            return []
+            
+        # Calculate range
+        start = max(0, pivot_idx - before)
+        end = min(len(all_ids), pivot_idx + after + 1)
+        
+        target_ids = [all_ids[i] for i in range(start, end) if i != pivot_idx]
+            
+        if not target_ids:
+            return []
+
         # Fetch from Qdrant
         retriever = get_retriever()
         chunks = retriever.vec.get_chunks_by_ids(target_ids)
-        return chunks
+        
+        # Sort results to match target_ids order
+        id_to_chunk = {c['id']: c for c in chunks}
+        sorted_chunks = [id_to_chunk[tid] for tid in target_ids if tid in id_to_chunk]
+        
+        return sorted_chunks
     except Exception as e:
-        logger.warning(f"Failed to get adjacent chunks: {e}")
+        logger.warning(f"Failed to get adjacent chunks for {chunk_id}: {e}")
         return []
 
 def query_document(

@@ -1,5 +1,4 @@
 import asyncio
-import os
 import random
 from typing import List, Dict, Any
 from langchain_openai import ChatOpenAI
@@ -8,6 +7,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from src.graph.schemas import Entity, Relationship, Episode, DOC_TYPE_SCHEMAS
+from src.llm.config import LLMConfig
 
 # --- Pydantic Models for Structured Output ---
 
@@ -47,7 +47,10 @@ class EpisodeResult(BaseModel):
 # --- Extractor Class ---
 
 class EntityExtractor:
-    def __init__(self, provider: str = "openai", model_name: str = "gpt-4o-mini", batch_size: int = 8):
+    def __init__(self, provider: str = "openai", model_name: str = None, batch_size: int = 8):
+        self.config = LLMConfig.from_env()
+        model_name = model_name or self.config.extractor_model
+        
         self.batch_size = batch_size
         # OPTIMIZED FIX: Concurrency=2 with batch_size=8 pushes ~160k TPM.
         # This maximizes speed while staying under the 200k TPM limit.
@@ -62,11 +65,10 @@ class EntityExtractor:
                 request_timeout=120.0 # Allow 2 mins for extraction
             )
         else:
-            base_url = os.getenv("OLLAMA_HOST_URL", "http://host.docker.internal:11434")
             self.llm = ChatOllama(
                 model=model_name, 
                 temperature=0.0, 
-                base_url=base_url,
+                base_url=self.config.ollama_base_url,
                 timeout=120.0
             )
 
