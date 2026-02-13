@@ -3,7 +3,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-A universal document assistant powered by LLMs that lets you upload and chat with any document type - books, technical documentation, movie scripts, reports, conversations, and more. Features hybrid search (BM25 + vector embeddings), multi-model support (OpenAI, Anthropic, local), and optional privacy mode.
+A universal document assistant powered by LLMs that lets you upload and chat with any document type - books, technical documentation, movie scripts, reports, conversations, and more. Features hybrid search (BM25 + vector + graph), multi-model support (OpenAI, local), and optional privacy mode.
 
 ## Features
 
@@ -12,13 +12,13 @@ A universal document assistant powered by LLMs that lets you upload and chat wit
 - **Intelligent Parsing**: Document-type aware parsing (chapters, scenes, sections, turns)
 - **Knowledge Graph**: Extracts entities and relationships for deep context (e.g. "How is X related to Y?")
 - **Hybrid Search**: Triple Fusion (BM25 + Vector + Graph) for maximum recall and precision
-- **Multi-Modal**: Text + images + tables (coming in Phase 3)
+- **Multi-Modal**: Text + images + tables (planned)
 - **AI Chat Interface**: Ask questions with context-aware responses and citations
 - **Multi-Document Search**: Compare themes across multiple documents simultaneously
 
 ### Model Flexibility
 - **OpenAI**: GPT-4o, GPT-4o-mini, GPT-4 Turbo, GPT-3.5 Turbo
-- **Local Models**: Llama 3.1 8B via Ollama
+- **Local Models**: Granite 3.2 8B via Ollama (or llama3.2:3b for lighter footprint)
 - **Privacy Modes**: 4 flexible privacy levels (Normal, Ephemeral, Internal, Private)
   - **Normal**: Full observability with any model
   - **Ephemeral**: No tracking, still uses cloud APIs
@@ -29,15 +29,7 @@ A universal document assistant powered by LLMs that lets you upload and chat wit
 - **Automatic Query Retry**: Rephrases and retries when no results found
 - **Smart Citations**: All responses include source references with page/section numbers
 - **Monitoring Dashboard**: Track query performance, LLM assessments, user feedback
-- **MCP Integration**: Uses Model Context Protocol for tool-based agent interactions
-
-## Current Status
-
-**Version**: 0.3.0
-**Phase**: Phase 3 Complete ✅ (Graph Knowledge Layer + Triple Hybrid Search)
-**Next**: Phase 4 - Advanced Evaluation & Optimization
-
-See [docs/DEVELOPMENT_PHASES.md](docs/DEVELOPMENT_PHASES.md) for detailed roadmap.
+- **LangGraph Orchestration**: Router-Retriever-Generator architecture with parallel retrieval
 
 ## Quick Start
 
@@ -70,7 +62,7 @@ OPENAI_API_KEY=sk-...
 
 # Optional - Local LLM settings
 LLM_PROVIDER=openai              # or 'local' for Ollama
-LOCAL_MODEL=llama3.1:8b          # Ollama model name
+OLLAMA_MODEL=granite3.2:8b       # Ollama model name
 OLLAMA_BASE_URL=http://ollama:11434  # Ollama endpoint (Docker service)
 ```
 
@@ -92,7 +84,7 @@ docker-compose -f docker-compose.ollama.yml up -d
 **Pull model (first time only):**
 
 ```bash
-docker exec -it doc-mate-ollama ollama pull llama3.1:8b
+docker exec -it doc-mate-ollama ollama pull granite3.2:8b
 ```
 
 **Verify:**
@@ -127,7 +119,7 @@ OLLAMA_HOST=0.0.0.0 ollama serve
 **3. Pull Model:**
 
 ```bash
-ollama pull llama3.2:3b
+ollama pull granite3.2:8b  # or llama3.2:3b for resource-constrained systems
 ```
 
 **4. Configure Doc-Mate:**
@@ -188,7 +180,7 @@ Go to the "Chat" tab:
 2. **Choose Provider**: OpenAI or Local Ollama
 3. **Select Model**:
    - OpenAI: GPT-4o Mini (recommended), GPT-4o, GPT-4 Turbo
-   - Local: Llama 3.1 8B
+   - Local: Granite 3.2 8B (or llama3.2:3b)
 4. **Choose Privacy Mode**:
    - **Normal**: Full metrics/tracing, any model (default)
    - **Ephemeral**: No tracking, still uses OpenAI
@@ -249,7 +241,6 @@ Go to http://localhost:6006 for detailed LLM observability:
        │                             │
        │                    ┌────────▼────────┐
        │                    │  OpenAI API     │
-       │                    │  Anthropic API  │
        │                    │  Local (Ollama) │
        │                    └─────────────────┘
        │
@@ -280,8 +271,7 @@ Go to http://localhost:6006 for detailed LLM observability:
 - **BM25**: Keyword-based search index
 - **LangGraph Agent**: State machine for reasoning and tool orchestration
 - **Graph Engine**: Entity extraction, resolution, and recursive traversal
-- **MCP Server**: Exposes document tools (search, summaries) to agent
-- **LLM Router**: Selects optimal model (OpenAI/Anthropic/Local) based on query
+- **LLM Router**: Selects optimal model (OpenAI/Local) based on privacy mode
 - **Phoenix**: LLM observability via OpenTelemetry traces
 
 ## Project Structure
@@ -291,32 +281,24 @@ doc-mate/
 ├── src/
 │   ├── app/              # Main application entry points
 │   ├── content/          # Document parsing and storage
-│   │   ├── parsers/      # Document-type specific parsers (Phase 1)
+│   │   ├── parsers/      # Document-type specific parsers
 │   │   └── store.py      # PostgreSQL storage
 │   ├── flows/            # Ingestion and query workflows
 │   ├── llm/              # LLM interfaces
-│   │   └── providers/    # Multi-model support (Phase 2)
-│   ├── mcp_client/       # MCP client agent implementation
-│   ├── mcp_server/       # MCP server with document tools
+│   │   └── providers/    # Multi-model support
+│   ├── mcp_client/       # Agent implementation
 │   ├── monitoring/       # Metrics collection and quality assessment
 │   ├── search/           # Hybrid search (BM25 + vector)
-│   │   └── multimodal.py # Image search (Phase 3)
+│   ├── graph/            # Knowledge graph (entities, relationships)
 │   └── ui/               # Gradio UI components
 ├── notebooks/            # Jupyter notebooks for exploration
 ├── DATA/                 # Document files
-│   └── images/           # Extracted images (Phase 3)
 ├── INDEXES/              # BM25 search indexes
 ├── scripts/              # Database migrations
-├── DEVELOPMENT_PHASES.md # Detailed roadmap
+├── docs/                 # Documentation
 ├── MIGRATION.md          # Migration guide from book-mate
 └── docker-compose.yml    # PostgreSQL + Qdrant services
 ```
-
-## Development Roadmap
-
-**Current Status**: Phase 2 Complete ✅ (Multi-document types + Local LLM + Privacy modes)
-
-See [docs/DEVELOPMENT_PHASES.md](docs/DEVELOPMENT_PHASES.md) for detailed roadmap and implementation plans.
 
 ## Privacy Modes
 
@@ -341,16 +323,16 @@ Doc-Mate offers 4 flexible privacy levels:
 **Programmatically:**
 
 ```python
-from src.mcp_client.agent import BookMateAgent
+from src.mcp_client.agent import DocMateAgent
 
 # Ephemeral: No tracking, can use OpenAI
-agent = BookMateAgent(provider="openai", ephemeral=True)
+agent = DocMateAgent(provider="openai", ephemeral=True)
 
 # Internal: Local LLM only, metrics saved
-agent = BookMateAgent(internal_mode=True)
+agent = DocMateAgent(internal_mode=True)
 
 # Private: Maximum privacy (ephemeral + internal)
-agent = BookMateAgent(ephemeral=True, internal_mode=True)
+agent = DocMateAgent(ephemeral=True, internal_mode=True)
 ```
 
 ### What Gets Tracked
@@ -378,19 +360,20 @@ For local LLM setup and testing, see [docs/LOCAL_LLM_REFERENCE.md](docs/LOCAL_LL
 | **OpenAI** | GPT-4o Mini | General queries | $0.15/M tokens | Fast (1-3s) |
 | **OpenAI** | GPT-4o | Complex analysis | $2.50/M tokens | Fast (2-4s) |
 | **OpenAI** | GPT-4 Turbo | Advanced reasoning | $5/M tokens | Fast (2-5s) |
-| **Local** | Llama 3.1 8B | Privacy, offline | Free | Slow (5-15s) |
+| **Local** | Granite 3.2 8B | Privacy, offline | Free | Moderate (5-10s) |
+| **Local** | llama3.2:3b | Resource-constrained | Free | Fast (3-6s) |
 
 **Recommendations:**
 - **Default**: GPT-4o Mini (best speed/cost/quality balance)
 - **Complex queries**: GPT-4o (comparative analysis, nuanced reasoning)
-- **Privacy**: Llama 3.1 8B (offline, no external calls)
-- **Air-gapped**: Llama 3.1 8B (compliance requirements)
+- **Privacy**: Granite 3.2 8B (offline, no external calls)
+- **Resource-constrained**: llama3.2:3b (lighter footprint, ~2GB RAM)
 
 ## Database Management
 
 ```bash
 # Check indexed documents
-psql -h localhost -U bookuser -d booksdb -c "SELECT doc_slug, title, doc_type FROM documents;"
+psql -h localhost -U bookuser -d booksdb -c "SELECT slug, title, doc_type FROM documents;"
 
 # Check metrics
 psql -h localhost -U bookuser -d booksdb -c "SELECT COUNT(*), AVG(latency_ms) FROM query_metrics;"
@@ -417,7 +400,7 @@ psql -h localhost -U bookuser -d booksdb -f scripts/migrate_to_docmate.sql
 Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 **Priority areas:**
-- Document type parsers (scripts, reports, conversations)
+- Multi-modal support (images, tables)
 - Local model optimization
 - UI/UX improvements
 - Test coverage
@@ -439,9 +422,6 @@ See [EVALUATION.md](EVALUATION.md) for methodology and ground truth generation.
 
 ## References & Acknowledgements
 
-**LLM Zoomcamp**: Thanks to DataTalks.Club for foundational learnings
-https://datatalks.club/courses/llm-zoomcamp/
-
 **Project Gutenberg**: Free public domain texts
 https://www.gutenberg.org/
 
@@ -452,12 +432,5 @@ https://www.gutenberg.org/
 GNU General Public License v3.0 - see LICENSE file for details.
 
 ---
-
-## What's Next?
-
-1. **Start with Phase 1**: Implement enhanced document parsing
-2. **Add multi-model support** (Phase 2): Support Anthropic and local models
-3. **Enable images** (Phase 3): Extract and search diagrams
-4. **Specialized features** (Phase 4): Script analysis, conversation stats
 
 Join the journey: [Issues](https://github.com/nupsea/doc-mate/issues) | [Discussions](https://github.com/nupsea/doc-mate/discussions)
