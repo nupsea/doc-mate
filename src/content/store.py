@@ -82,6 +82,9 @@ class PgresStore:
     def delete_document(self, doc_identifier: int | str) -> bool:
         """
         Delete a document and all related data.
+        All child tables (chapter_summaries, document_summaries, graph_entities,
+        graph_relationships, graph_episodes, bm25_index, bm25_doc_lens) use
+        ON DELETE CASCADE and are cleaned up automatically.
         """
         doc_id = self._resolve_doc_id(doc_identifier)
         if not doc_id:
@@ -222,15 +225,20 @@ class PgresStore:
         )
         return row[0] if row else None
 
-    def store_bm25_index(self, term_freqs: list[tuple[str, str, int]], doc_lens: list[tuple[str, int]]):
-        """Store BM25 term frequencies and document lengths in bulk."""
+    def store_bm25_index(self, term_freqs: list[tuple[str, str, int, int]], doc_lens: list[tuple[str, int, int]]):
+        """Store BM25 term frequencies and document lengths in bulk.
+
+        Args:
+            term_freqs: list of (term, chunk_id, frequency, doc_id)
+            doc_lens: list of (chunk_id, doc_len, doc_id)
+        """
         with self._get_conn() as conn:
             with conn.cursor() as cur:
                 # Store term frequencies
                 execute_values(
                     cur,
                     """
-                    INSERT INTO bm25_index (term, chunk_id, frequency)
+                    INSERT INTO bm25_index (term, chunk_id, frequency, doc_id)
                     VALUES %s
                     ON CONFLICT (term, chunk_id) DO UPDATE SET frequency = excluded.frequency
                     """,
@@ -241,7 +249,7 @@ class PgresStore:
                 execute_values(
                     cur,
                     """
-                    INSERT INTO bm25_doc_lens (chunk_id, doc_len)
+                    INSERT INTO bm25_doc_lens (chunk_id, doc_len, doc_id)
                     VALUES %s
                     ON CONFLICT (chunk_id) DO UPDATE SET doc_len = excluded.doc_len
                     """,
@@ -251,11 +259,14 @@ class PgresStore:
 
     def get_bm25_stats(self, terms: list[str], doc_slug: str = None):
         """Retrieve statistics needed for BM25 scoring."""
+        # Resolve slug -> doc_id once for all queries
+        doc_id = self._resolve_doc_id(doc_slug) if doc_slug else None
+
         with self._get_conn() as conn:
             with conn.cursor() as cur:
                 # 1. Total document count (N)
-                if doc_slug:
-                    cur.execute("SELECT COUNT(*) FROM bm25_doc_lens WHERE chunk_id LIKE %s", (f"{doc_slug}_%",))
+                if doc_id:
+                    cur.execute("SELECT COUNT(*) FROM bm25_doc_lens WHERE doc_id = %s", (doc_id,))
                 else:
                     cur.execute("SELECT COUNT(*) FROM bm25_doc_lens")
                 N = cur.fetchone()[0]
@@ -263,10 +274,10 @@ class PgresStore:
                 # 2. Document frequencies (df) for the requested terms
                 df = {}
                 if terms:
-                    if doc_slug:
+                    if doc_id:
                         cur.execute(
-                            "SELECT term, COUNT(chunk_id) FROM bm25_index WHERE term = ANY(%s) AND chunk_id LIKE %s GROUP BY term",
-                            (terms, f"{doc_slug}_%"),
+                            "SELECT term, COUNT(chunk_id) FROM bm25_index WHERE term = ANY(%s) AND doc_id = %s GROUP BY term",
+                            (terms, doc_id),
                         )
                     else:
                         cur.execute(
@@ -279,20 +290,20 @@ class PgresStore:
                 tf = {}
                 doc_lens = {}
                 if terms:
-                    if doc_slug:
+                    if doc_id:
                         cur.execute(
                             """
-                            SELECT bi.chunk_id, bi.term, bi.frequency, dl.doc_len 
+                            SELECT bi.chunk_id, bi.term, bi.frequency, dl.doc_len
                             FROM bm25_index bi
                             JOIN bm25_doc_lens dl ON bi.chunk_id = dl.chunk_id
-                            WHERE bi.term = ANY(%s) AND bi.chunk_id LIKE %s
+                            WHERE bi.term = ANY(%s) AND bi.doc_id = %s
                             """,
-                            (terms, f"{doc_slug}_%"),
+                            (terms, doc_id),
                         )
                     else:
                         cur.execute(
                             """
-                            SELECT bi.chunk_id, bi.term, bi.frequency, dl.doc_len 
+                            SELECT bi.chunk_id, bi.term, bi.frequency, dl.doc_len
                             FROM bm25_index bi
                             JOIN bm25_doc_lens dl ON bi.chunk_id = dl.chunk_id
                             WHERE bi.term = ANY(%s)

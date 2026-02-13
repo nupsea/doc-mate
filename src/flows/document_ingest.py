@@ -143,7 +143,10 @@ def store_document_metadata(
     store = PgresStore()
 
     if force_update and store.document_exists(slug):
+        # delete_document handles DB cleanup (cascading summaries/graph + explicit BM25)
         store.delete_document(slug)
+        # Also purge stale Qdrant vectors for this slug
+        _cleanup_qdrant_vectors(slug)
 
     # Use new store_document method for multi-format support
     doc_id = store.store_document(
@@ -158,20 +161,43 @@ def store_document_metadata(
     )
     return {"doc_id": doc_id, "slug": slug}
 
+
+def _cleanup_qdrant_vectors(slug: str):
+    """Remove Qdrant vectors whose payload 'id' matches the slug prefix."""
+    try:
+        from src.search.vec import SemanticRetriever
+        from qdrant_client import models
+
+        vec = SemanticRetriever()
+        if not vec.qdrant.collection_exists(vec.COLLECTION):
+            return
+        vec.qdrant.delete(
+            collection_name=vec.COLLECTION,
+            points_selector=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="id", match=models.MatchText(text=slug)
+                    )
+                ]
+            ),
+        )
+    except Exception as e:
+        print(f"[WARNING] Qdrant cleanup for '{slug}' failed: {e}")
+
 def store_summaries_to_db(slug: str, chapter_summaries: list, document_summary: str):
     """Store document summaries to database."""
     store = PgresStore()
     if chapter_summaries and document_summary:
         store.store_summaries(slug, chapter_summaries, document_summary)
 
-async def build_search_indexes(chunks: list):
+async def build_search_indexes(chunks: list, doc_id: int):
     """Build BM25 and vector search indexes in parallel."""
     retriever = FusionRetriever()
 
     # Run BM25 and Vector indexing concurrently
     # Both methods now handle batching internally
     await asyncio.gather(
-        asyncio.to_thread(retriever.bm25.build_index, chunks),
+        asyncio.to_thread(retriever.bm25.build_index, chunks, doc_id),
         asyncio.to_thread(retriever.vec.build_index, chunks)
     )
 
@@ -350,7 +376,7 @@ async def ingest_document(
     
     summary_result, search_result, graph_stats = await asyncio.gather(
         generate_summaries(parse_result["chunks"], doc_type=doc_type, ephemeral=ephemeral, slug=slug),
-        build_search_indexes(parse_result["chunks"]),
+        build_search_indexes(parse_result["chunks"], db_result["doc_id"]),
         build_graph_index(parse_result["chunks"], db_result["doc_id"], doc_type, ephemeral=ephemeral)
     )
     

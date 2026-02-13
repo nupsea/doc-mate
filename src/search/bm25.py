@@ -2,15 +2,22 @@ import math
 import re
 import logging
 from collections import Counter
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 from src.content.store import PgresStore
 
 logger = logging.getLogger(__name__)
 
-STOPWORDS = {"the", "a", "an", "and", "of", "in", "to"}
+STOPWORDS = frozenset(ENGLISH_STOP_WORDS)
 
 
 def simple_tokenize(text):
-    return [w for w in re.findall(r"\w+", text.lower()) if w not in STOPWORDS]
+    # Match alphabetic runs of 2+ chars -- excludes pure numbers,
+    # underscores, and single-char residue from contractions/possessives.
+    return [
+        w
+        for w in re.findall(r"[a-z]{2,}", text.lower())
+        if w not in STOPWORDS
+    ]
 
 
 class BM25Retriever:
@@ -19,12 +26,12 @@ class BM25Retriever:
         self.b = b
         self.store = PgresStore()
 
-    def build_index(self, chunks, batch_size=100):
+    def build_index(self, chunks, doc_id: int, batch_size=100):
         """
         Build BM25 index from chunks and store in DB in batches.
         """
         total_chunks = len(chunks)
-        logger.info(f"Building BM25 index for {total_chunks} chunks in batches of {batch_size}...")
+        logger.info(f"Building BM25 index for {total_chunks} chunks (doc_id={doc_id}) in batches of {batch_size}...")
 
         for i in range(0, total_chunks, batch_size):
             batch = chunks[i : i + batch_size]
@@ -35,12 +42,12 @@ class BM25Retriever:
                 chunk_id = chunk["id"]
                 tokens = simple_tokenize(chunk["text"])
                 doc_len = len(tokens)
-                doc_lens.append((chunk_id, doc_len))
-                
+                doc_lens.append((chunk_id, doc_len, doc_id))
+
                 # Count term frequencies for this chunk
                 freqs = Counter(tokens)
                 for term, freq in freqs.items():
-                    term_freqs.append((term, chunk_id, freq))
+                    term_freqs.append((term, chunk_id, freq, doc_id))
 
             # Store batch in DB
             if term_freqs:

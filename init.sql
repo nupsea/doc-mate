@@ -38,17 +38,24 @@ CREATE TABLE IF NOT EXISTS document_summaries (
 CREATE TABLE IF NOT EXISTS bm25_index (
     term TEXT NOT NULL,
     chunk_id TEXT NOT NULL,
+    doc_id INT NOT NULL,
     frequency INT NOT NULL,
-    PRIMARY KEY (term, chunk_id)
+    PRIMARY KEY (term, chunk_id),
+    FOREIGN KEY (doc_id) REFERENCES documents(doc_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_bm25_term ON bm25_index(term);
 CREATE INDEX IF NOT EXISTS idx_bm25_chunk_id ON bm25_index(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_bm25_index_doc_id ON bm25_index(doc_id);
 
 CREATE TABLE IF NOT EXISTS bm25_doc_lens (
     chunk_id TEXT PRIMARY KEY,
-    doc_len INT NOT NULL
+    doc_id INT NOT NULL,
+    doc_len INT NOT NULL,
+    FOREIGN KEY (doc_id) REFERENCES documents(doc_id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_bm25_doc_lens_doc_id ON bm25_doc_lens(doc_id);
 
 -- Metrics tables for monitoring
 CREATE TABLE IF NOT EXISTS query_metrics (

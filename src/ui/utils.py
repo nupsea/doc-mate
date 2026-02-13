@@ -192,7 +192,7 @@ format_book_list = format_document_list
 def delete_document(slug: str) -> tuple[bool, str, int]:
     """
     Delete a document and all its associated data from:
-    - PostgreSQL (documents table - cascades to summaries and index)
+    - PostgreSQL (documents row + cascaded summaries/graph + explicit BM25 cleanup)
     - Qdrant vector store
 
     Returns:
@@ -203,7 +203,6 @@ def delete_document(slug: str) -> tuple[bool, str, int]:
         from qdrant_client import models
 
         store = PgresStore()
-        retriever = FusionRetriever()
 
         # Check if document exists and get info
         result = store.execute("SELECT title, num_chunks FROM documents WHERE slug = %s", (slug,), fetch="one")
@@ -213,17 +212,14 @@ def delete_document(slug: str) -> tuple[bool, str, int]:
         doc_title = result[0]
         deleted_chunks = result[1] or 0
 
-        # Delete from PostgreSQL (CASCADE handles summaries, BM25 index needs manual cleanup if no FK)
-        # Note: bm25_index uses chunk_id which starts with slug_
-        store.execute("DELETE FROM bm25_index WHERE chunk_id LIKE %s", (f"{slug}_%",), commit=True)
-        store.execute("DELETE FROM bm25_doc_lens WHERE chunk_id LIKE %s", (f"{slug}_%",), commit=True)
-        store.execute("DELETE FROM documents WHERE slug = %s", (slug,), commit=True)
+        # Delete from PostgreSQL (handles cascade + BM25 cleanup)
+        store.delete_document(slug)
 
         # Delete from Qdrant
         qdrant_success = True
         qdrant_error = ""
         try:
-            # FusionRetriever doesn't have qdrant_client directly, it's in vec.qdrant
+            retriever = FusionRetriever()
             retriever.vec.qdrant.delete(
                 collection_name=retriever.vec.COLLECTION,
                 points_selector=models.Filter(
