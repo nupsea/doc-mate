@@ -345,6 +345,73 @@ class PostgresGraphStore(PgresStore):
         self.execute("DELETE FROM graph_entities WHERE doc_id = %s", (doc_id,), commit=True)
         self.execute("DELETE FROM graph_episodes WHERE doc_id = %s", (doc_id,), commit=True)
 
+    def get_episodes_by_chunk_ids(self, doc_id: int, chunk_ids: List[str]) -> List[Dict[str, Any]]:
+        """
+        Find episodes whose source_chunk_ids overlap with the given chunk_ids.
+        Uses array overlap operator (&&) with GIN index for efficiency.
+        """
+        if not chunk_ids:
+            return []
+
+        rows = self.execute(
+            """
+            SELECT topic, summary, speaker, stance, turn_start, turn_end, source_chunk_ids
+            FROM graph_episodes
+            WHERE doc_id = %s AND source_chunk_ids && %s
+            ORDER BY turn_start ASC
+            """,
+            (doc_id, chunk_ids),
+            fetch="all"
+        )
+
+        if not rows:
+            return []
+
+        episodes = []
+        for row in rows:
+            episodes.append({
+                "topic": row[0],
+                "summary": row[1],
+                "speaker": row[2],
+                "stance": row[3],
+                "turn_start": row[4],
+                "turn_end": row[5],
+                "source_chunk_ids": row[6]
+            })
+        return episodes
+
+    def get_all_episodes_for_doc(self, doc_id: int) -> List[Dict[str, Any]]:
+        """
+        Return all episodes for a document ordered by turn_start.
+        Used by arc summarization for long conversations.
+        """
+        rows = self.execute(
+            """
+            SELECT topic, summary, speaker, stance, turn_start, turn_end, source_chunk_ids
+            FROM graph_episodes
+            WHERE doc_id = %s
+            ORDER BY turn_start ASC
+            """,
+            (doc_id,),
+            fetch="all"
+        )
+
+        if not rows:
+            return []
+
+        episodes = []
+        for row in rows:
+            episodes.append({
+                "topic": row[0],
+                "summary": row[1],
+                "speaker": row[2],
+                "stance": row[3],
+                "turn_start": row[4],
+                "turn_end": row[5],
+                "source_chunk_ids": row[6]
+            })
+        return episodes
+
     def get_episodes_for_doc(self, slug: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
         Fetch recent episodes for a document (conversation).

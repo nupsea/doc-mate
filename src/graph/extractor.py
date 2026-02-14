@@ -199,14 +199,23 @@ Text Content (with IDs):
                     return entities, relationships
 
                 except Exception as e:
-                    # Specific handling for Rate Limits
                     error_msg = str(e).lower()
-                    if ("rate_limit" in error_msg or "429" in error_msg) and attempt < max_retries - 1:
-                        wait_time = retry_delay * (2 ** attempt)
-                        print(f"[Graph Extraction] Rate limit hit (Attempt {attempt+1}/{max_retries}). Retrying in {wait_time}s...")
+                    is_transient = (
+                        "rate_limit" in error_msg or "429" in error_msg
+                        or "connection" in error_msg or "timeout" in error_msg or "timed out" in error_msg
+                        or "apiconnectionerror" in error_msg
+                        or "server_error" in error_msg or "500" in error_msg
+                        or "502" in error_msg or "503" in error_msg
+                    )
+                    if is_transient and attempt < max_retries - 1:
+                        is_rate_limit = "rate_limit" in error_msg or "429" in error_msg
+                        base = retry_delay if is_rate_limit else 10
+                        wait_time = base * (2 ** attempt)
+                        label = "Rate limit" if is_rate_limit else "Transient error"
+                        print(f"[Graph Extraction] {label} (Attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait_time}s...")
                         await asyncio.sleep(wait_time)
                         continue
-                    
+
                     print(f"[Graph Extraction Error] Batch failed: {e}")
                     return [], []
         
@@ -214,43 +223,78 @@ Text Content (with IDs):
 
     async def extract_episodes(self, chunks: List[Dict[str, Any]]) -> List[Episode]:
         """Extract episodes from chunks."""
-        # Skip episodes for social chats (too noisy/fluid)
-        if self._is_social_chat(chunks):
-            print("[Episode Extraction] Skipping for social chat")
-            return []
-            
-        batches = [chunks[i:i + self.batch_size] for i in range(0, len(chunks), self.batch_size)]
-        
+        # Smaller batches than entity extraction -- episodes produce more output per chunk
+        episode_batch_size = max(self.batch_size // 2, 2)
+        batches = [chunks[i:i + episode_batch_size] for i in range(0, len(chunks), episode_batch_size)]
+
         tasks = [self._process_episode_batch(batch) for batch in batches]
         results = await asyncio.gather(*tasks)
-        
+
         all_episodes = []
         for batch_episodes in results:
             all_episodes.extend(batch_episodes)
-            
+
         return all_episodes
 
     async def _process_episode_batch(self, batch: List[Dict[str, Any]]) -> List[Episode]:
         text_content = "\n\n".join([f"[{c['id']}]: {c['text']}" for c in batch])
 
-        async with self.semaphore:
-            try:
-                result: EpisodeResult = await self.episode_chain.ainvoke({
-                    "text_content": text_content
-                })
+        max_retries = 5
+        retry_delay = 5
 
-                episodes = [
-                    Episode(
-                        speaker=ep.speaker,
-                        topic=ep.topic,
-                        stance=ep.stance,
-                        summary=ep.summary,
-                        entity_names=ep.mentioned_entities,
-                        source_chunk_ids=ep.source_chunk_ids
-                    ) for ep in result.episodes
-                ]
-                return episodes
+        await asyncio.sleep(random.uniform(0.05, 0.2))
 
-            except Exception as e:
-                print(f"[Episode Extraction Error]: {e}")
-                return []
+        for attempt in range(max_retries):
+            async with self.semaphore:
+                try:
+                    result: EpisodeResult = await self.episode_chain.ainvoke({
+                        "text_content": text_content
+                    })
+
+                    await asyncio.sleep(0.1)
+
+                    episodes = [
+                        Episode(
+                            speaker=ep.speaker,
+                            topic=ep.topic,
+                            stance=ep.stance,
+                            summary=ep.summary,
+                            entity_names=ep.mentioned_entities,
+                            source_chunk_ids=ep.source_chunk_ids
+                        ) for ep in result.episodes
+                    ]
+                    return episodes
+
+                except Exception as e:
+                    error_msg = str(e).lower()
+
+                    # Output too large -- split batch in half and retry smaller
+                    if "length limit" in error_msg and len(batch) > 1:
+                        mid = len(batch) // 2
+                        print(f"[Episode Extraction] Output truncated ({len(batch)} chunks). Splitting into {mid} + {len(batch) - mid} and retrying...")
+                        left, right = await asyncio.gather(
+                            self._process_episode_batch(batch[:mid]),
+                            self._process_episode_batch(batch[mid:])
+                        )
+                        return left + right
+
+                    is_transient = (
+                        "rate_limit" in error_msg or "429" in error_msg
+                        or "connection" in error_msg or "timeout" in error_msg or "timed out" in error_msg
+                        or "apiconnectionerror" in error_msg
+                        or "server_error" in error_msg or "500" in error_msg
+                        or "502" in error_msg or "503" in error_msg
+                    )
+                    if is_transient and attempt < max_retries - 1:
+                        is_rate_limit = "rate_limit" in error_msg or "429" in error_msg
+                        base = retry_delay if is_rate_limit else 10
+                        wait_time = base * (2 ** attempt)
+                        label = "Rate limit" if is_rate_limit else "Transient error"
+                        print(f"[Episode Extraction] {label} (Attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                        continue
+
+                    print(f"[Episode Extraction Error]: {e}")
+                    return []
+
+        return []

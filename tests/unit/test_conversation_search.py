@@ -3,10 +3,12 @@ Test conversation search improvements:
 1. Higher topk for conversations (15 vs 5)
 2. Diversity filtering (temporal spreading, speaker balancing)
 3. Timestamp exposure in results
+4. Adaptive chunk sizing
 """
 
 from datetime import datetime, timedelta
 from src.flows.document_query import _diversify_conversation_results, _parse_timestamp
+from src.content.parsers.conversation_parser import ConversationParser
 
 
 def assert_test(condition, message):
@@ -191,6 +193,54 @@ def test_diversity_mixed_metadata():
     assert len(diversified) <= 3
 
 
+def test_adaptive_chunking_short_conversation():
+    """< 20 turns should keep the default max_tokens."""
+    parser = ConversationParser.__new__(ConversationParser)
+    counts = [25] * 10  # 10 turns
+    result = parser._compute_adaptive_max_tokens(counts, 500)
+    assert result == 500, f"Expected 500 for short conversation, got {result}"
+
+
+def test_adaptive_chunking_social_chat():
+    """avg turn < 30 tokens should produce max_tokens=1000."""
+    parser = ConversationParser.__new__(ConversationParser)
+    counts = [15] * 200  # 200 short turns
+    result = parser._compute_adaptive_max_tokens(counts, 500)
+    assert result == 1000, f"Expected 1000 for social chat, got {result}"
+
+
+def test_adaptive_chunking_default_range():
+    """avg turn 30-150 tokens should produce max_tokens=500."""
+    parser = ConversationParser.__new__(ConversationParser)
+    counts = [80] * 50  # 50 medium turns
+    result = parser._compute_adaptive_max_tokens(counts, 500)
+    assert result == 500, f"Expected 500 for medium turns, got {result}"
+
+
+def test_adaptive_chunking_formal():
+    """avg turn > 150 tokens should produce max_tokens=400."""
+    parser = ConversationParser.__new__(ConversationParser)
+    counts = [200] * 30  # 30 long turns
+    result = parser._compute_adaptive_max_tokens(counts, 500)
+    assert result == 400, f"Expected 400 for formal/long turns, got {result}"
+
+
+def test_adaptive_chunking_boundary_30():
+    """avg turn exactly 30 should use default range (500)."""
+    parser = ConversationParser.__new__(ConversationParser)
+    counts = [30] * 25
+    result = parser._compute_adaptive_max_tokens(counts, 500)
+    assert result == 500, f"Expected 500 at boundary 30, got {result}"
+
+
+def test_adaptive_chunking_boundary_150():
+    """avg turn exactly 150 should use default range (500)."""
+    parser = ConversationParser.__new__(ConversationParser)
+    counts = [150] * 25
+    result = parser._compute_adaptive_max_tokens(counts, 500)
+    assert result == 500, f"Expected 500 at boundary 150, got {result}"
+
+
 if __name__ == "__main__":
     print("=" * 80)
     print("CONVERSATION SEARCH TESTS")
@@ -205,6 +255,12 @@ if __name__ == "__main__":
         test_diversity_filtering_preserves_search_ranking,
         test_diversity_target_count,
         test_diversity_mixed_metadata,
+        test_adaptive_chunking_short_conversation,
+        test_adaptive_chunking_social_chat,
+        test_adaptive_chunking_default_range,
+        test_adaptive_chunking_formal,
+        test_adaptive_chunking_boundary_30,
+        test_adaptive_chunking_boundary_150,
     ]
 
     passed = 0

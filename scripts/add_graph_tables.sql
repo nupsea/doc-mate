@@ -63,3 +63,4 @@ CREATE INDEX IF NOT EXISTS idx_gep_doc ON graph_episodes(doc_id);
 CREATE INDEX IF NOT EXISTS idx_gep_speaker ON graph_episodes(speaker);
 CREATE INDEX IF NOT EXISTS idx_gep_topic ON graph_episodes(topic);
 CREATE INDEX IF NOT EXISTS idx_gep_stance ON graph_episodes(stance);
+CREATE INDEX IF NOT EXISTS idx_gep_chunk_ids ON graph_episodes USING GIN (source_chunk_ids);

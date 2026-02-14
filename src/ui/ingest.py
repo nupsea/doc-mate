@@ -4,8 +4,13 @@ Document ingestion interface component - supports books, scripts, conversations,
 Backward compatible with document ingestion.
 """
 
+import asyncio
+import sys
+import threading
+import uuid
 import gradio as gr
 from pathlib import Path
+from src.content.store import PgresStore
 from src.flows.document_ingest import ingest_document
 from src.ui.utils import (
     validate_slug,
@@ -15,6 +20,32 @@ from src.ui.utils import (
     delete_document,
 )
 from src.ui.pattern_builder import build_pattern_from_example, validate_pattern_on_file
+from src.flows.ingest_profiles import PROFILES, DEFAULT_PROFILE, check_ollama_available
+
+
+class _StreamCapture:
+    """Thread-safe capture of stdout writes for streaming to Gradio UI."""
+
+    def __init__(self, original_stdout):
+        self._original = original_stdout
+        self._buffer: list[str] = []
+        self._lock = threading.Lock()
+
+    def write(self, text):
+        self._original.write(text)
+        if text.strip():
+            with self._lock:
+                self._buffer.append(text)
+
+    def flush(self):
+        self._original.flush()
+
+    def drain(self) -> str:
+        """Return and clear buffered lines."""
+        with self._lock:
+            lines = list(self._buffer)
+            self._buffer.clear()
+        return "".join(lines)
 
 
 def test_chapter_pattern(file, chapter_example: str):
@@ -67,6 +98,7 @@ async def ingest_new_document(
     force_update: bool,
     doc_type: str = 'book',
     ephemeral: bool = False,
+    profile_name: str = None,
 ):
     """Handle document ingestion from UI (all types)."""
     if not file:
@@ -109,6 +141,10 @@ async def ingest_new_document(
                 "status": "[ERROR] Error",
                 "clear_inputs": False,
             }
+
+    # Create a persistent job record so the UI can show status after reconnect
+    job_id = uuid.uuid4().hex[:12]
+    job_store = PgresStore()
 
     try:
         file_path = Path(file.name)
@@ -155,6 +191,9 @@ async def ingest_new_document(
         if ephemeral:
             output += "[EPHEMERAL] Ephemeral mode enabled - no traces will be created\n"
 
+        # Record job as running *before* the actual work begins
+        job_store.create_ingest_job(job_id, slug, title.strip(), doc_type)
+
         # Run ingestion (use ingest_document for all types)
         result = await ingest_document(
             slug=slug,
@@ -165,6 +204,7 @@ async def ingest_new_document(
             split_pattern=pattern,
             force_update=force_update,
             ephemeral=ephemeral,
+            profile_name=profile_name,
         )
 
         output += f"\n[SUCCESS] {doc_type.title()} ingested:\n"
@@ -180,22 +220,33 @@ async def ingest_new_document(
 
         structure_detail = ""
         if chunk_info["status"] == "success":
-            output += f"- Total sections detected: {chunk_info['total_sections']}\n"
             output += f"- Total chunks indexed: {chunk_info['total_chunks']}\n"
-            output += f"- Section range: {chunk_info['section_range']}\n"
             output += f"- First chunk ID: {chunk_info['first_chunk']}\n"
             output += f"- Last chunk ID: {chunk_info['last_chunk']}\n\n"
 
-            if chunk_info["total_sections"] == result["chapters"]:
+            # Conversations use sequential chunk IDs (no section grouping in IDs),
+            # so section verification is only meaningful for books/docs.
+            if doc_type == "conversation":
+                output += f"[OK] Indexed {chunk_info['total_chunks']} chunks, {result['chapters']} arc summaries. Ingestion successful."
+                structure_detail = f"{result['chapters']} arcs, {chunk_info['total_chunks']} chunks"
+            elif chunk_info["total_sections"] == result["chapters"]:
+                output += f"- Total sections detected: {chunk_info['total_sections']}\n"
+                output += f"- Section range: {chunk_info['section_range']}\n"
                 output += "[OK] Section count matches! Ingestion successful."
                 structure_detail = f"Sections: {', '.join(chunk_info['sections'])}"
             else:
+                output += f"- Total sections detected: {chunk_info['total_sections']}\n"
+                output += f"- Section range: {chunk_info['section_range']}\n"
                 output += "[WARNING] Section count mismatch!\n"
                 output += f"Expected: {result['chapters']}, Found in index: {chunk_info['total_sections']}"
                 structure_detail = f"Mismatch: {chunk_info['total_sections']} sections"
         else:
             output += f"[ERROR] Error analyzing chunks: {chunk_info['message']}"
             structure_detail = "Analysis failed"
+
+        # Mark job completed with a short summary
+        summary = f"chunks={result['chunks']}, sections={result['chapters']}, indexed={result['search_indexed']}"
+        job_store.complete_ingest_job(job_id, summary)
 
         return {
             "output": output,
@@ -207,11 +258,43 @@ async def ingest_new_document(
     except Exception as e:
         import traceback
         traceback.print_exc()  # This will print full traceback to docker logs
+
+        # Persist the failure so the banner can show it after reconnect
+        try:
+            job_store.fail_ingest_job(job_id, str(e))
+        except Exception:
+            pass  # Best effort -- don't mask the original error
+
         return {
             "output": f"[ERROR] Error during ingestion: {str(e)}",
             "status": "[ERROR] Ingestion Failed",
             "clear_inputs": False,
         }
+
+
+def _format_job_banner(job: dict | None) -> str:
+    """Return a Markdown string describing the latest ingest job, or empty."""
+    if not job:
+        return ""
+    from datetime import datetime, timezone
+
+    created = job["created_at"]
+    now = datetime.now(created.tzinfo) if created.tzinfo else datetime.now()
+    mins_ago = max(int((now - created).total_seconds() / 60), 0)
+    time_label = f"{mins_ago} min ago" if mins_ago < 120 else f"{mins_ago // 60}h ago"
+
+    slug = job["slug"]
+    title = job["title"] or slug
+
+    if job["status"] == "running":
+        return f"**Ingestion in progress:** '{title}' ({slug}) is still running... (started {time_label})"
+    if job["status"] == "completed":
+        summary = job["result_summary"] or ""
+        return f"**Last ingestion:** '{title}' ({slug}) completed -- {summary} ({time_label})"
+    if job["status"] == "failed":
+        err = job["error_message"] or "unknown error"
+        return f"**Last ingestion failed:** '{title}' ({slug}) -- {err} ({time_label})"
+    return ""
 
 
 def create_ingest_interface():
@@ -221,6 +304,8 @@ def create_ingest_interface():
     with gr.Column():
         gr.Markdown("### Upload and Index a New Document")
 
+        last_job_banner = gr.Markdown(value="", elem_id="ingest-job-banner")
+
         with gr.Row():
             with gr.Column(scale=2):
                 # Document type selector
@@ -229,6 +314,26 @@ def create_ingest_interface():
                     value="book",
                     label="Document Type",
                     info="Select the type of document you're uploading"
+                )
+
+                # Ingestion profile selector
+                profile_choices = [(p.label, key) for key, p in PROFILES.items()]
+                profile_selector = gr.Radio(
+                    choices=profile_choices,
+                    value=DEFAULT_PROFILE,
+                    label="Ingestion Profile",
+                    info="Controls speed / quality / cost tradeoffs",
+                )
+
+                profile_description = gr.Markdown(
+                    value=PROFILES[DEFAULT_PROFILE].description,
+                )
+
+                time_estimate_display = gr.Textbox(
+                    label="Estimated Time",
+                    value="Upload a file to see time estimate",
+                    lines=1,
+                    interactive=False,
                 )
 
                 file_upload = gr.File(
@@ -382,6 +487,44 @@ def create_ingest_interface():
             ],
         )
 
+        # Update profile description and time estimate
+        def update_profile_info(profile_name, file, doc_type):
+            profile = PROFILES.get(profile_name, PROFILES[DEFAULT_PROFILE])
+            desc = profile.description
+
+            needs_local = profile.summary_provider == "local" or profile.graph_provider == "local"
+            if needs_local:
+                try:
+                    if not check_ollama_available():
+                        desc += "\n\n**Warning:** Ollama is not reachable. Start Ollama or choose an OpenAI profile."
+                except Exception:
+                    desc += "\n\n**Warning:** Could not check Ollama availability."
+
+            time_str = "Upload a file to see time estimate"
+            if file:
+                try:
+                    file_size = Path(file.name).stat().st_size
+                    est_chunks = max(1, file_size // 4 // 500)
+                    min_s, max_s = profile.estimate_seconds(est_chunks, doc_type or "book")
+                    min_m, max_m = max(1, min_s // 60), max(1, max_s // 60)
+                    time_str = f"~{min_m}-{max_m} min (~{est_chunks} chunks)"
+                except Exception:
+                    time_str = "Could not estimate"
+
+            return desc, time_str
+
+        profile_selector.change(
+            update_profile_info,
+            [profile_selector, file_upload, doc_type_selector],
+            [profile_description, time_estimate_display],
+        )
+
+        file_upload.change(
+            update_profile_info,
+            [profile_selector, file_upload, doc_type_selector],
+            [profile_description, time_estimate_display],
+        )
+
         test_pattern_btn.click(
             test_chapter_pattern,
             [file_upload, chapter_example_input],
@@ -389,22 +532,69 @@ def create_ingest_interface():
         )
 
         async def handle_ingest(
-            doc_type, file, title, author, slug, skip_chap, chapter_ex, force, ephemeral
+            doc_type, profile_name, file, title, author, slug, skip_chap, chapter_ex, force, ephemeral
         ):
-            result = await ingest_new_document(
-                file, title, author, slug, skip_chap, chapter_ex, force, doc_type, ephemeral
+            """Streaming ingestion handler -- yields progress every 2s to keep UI alive."""
+            # Helper to build a yield-tuple that only updates log + status
+            keep = gr.update()
+            def _progress(log_text, status_text):
+                return (
+                    log_text, status_text, keep,   # log, status, structure
+                    keep, keep, keep, keep, keep, keep,  # inputs unchanged
+                    keep, keep,                          # library unchanged
+                    keep,                                # banner unchanged
+                )
+
+            # Start capturing stdout so we can relay pipeline prints to the UI
+            capture = _StreamCapture(sys.stdout)
+            old_stdout = sys.stdout
+            sys.stdout = capture
+
+            # Launch ingestion as a concurrent task
+            task = asyncio.ensure_future(
+                ingest_new_document(
+                    file, title, author, slug, skip_chap, chapter_ex, force, doc_type, ephemeral,
+                    profile_name=profile_name,
+                )
             )
 
-            # Refresh library list with timestamp
+            log_so_far = ""
+            try:
+                # Poll for progress while ingestion runs
+                while not task.done():
+                    await asyncio.sleep(2)
+                    new_lines = capture.drain()
+                    if new_lines:
+                        log_so_far += new_lines + "\n"
+                        yield _progress(log_so_far, "[RUNNING] Ingestion in progress...")
+
+                # Drain any final output
+                new_lines = capture.drain()
+                if new_lines:
+                    log_so_far += new_lines + "\n"
+            finally:
+                sys.stdout = old_stdout
+
+            # Get the result (may raise if ingestion failed)
+            result = task.result()
+
+            # Refresh library list
             new_list = format_document_list(get_available_documents())
             new_timestamp = (
                 f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
 
-            # Clear inputs if successful
+            final_log = log_so_far + "\n" + result["output"]
+
+            # Refresh banner after ingestion
+            try:
+                banner = _format_job_banner(PgresStore().get_latest_ingest_job())
+            except Exception:
+                banner = ""
+
             if result["clear_inputs"]:
-                return (
-                    result["output"],
+                yield (
+                    final_log,
                     result["status"],
                     result.get("chapter_detail", ""),
                     None,  # Clear file
@@ -415,26 +605,24 @@ def create_ingest_interface():
                     "",  # Clear pattern test
                     new_list,
                     new_timestamp,
+                    banner,
                 )
             else:
-                return (
-                    result["output"],
+                yield (
+                    final_log,
                     result["status"],
                     result.get("chapter_detail", ""),
-                    gr.update(),  # Keep file
-                    gr.update(),  # Keep title
-                    gr.update(),  # Keep author
-                    gr.update(),  # Keep slug
-                    gr.update(),  # Keep chapter example
-                    gr.update(),  # Keep pattern test
+                    keep, keep, keep, keep, keep, keep,
                     new_list,
                     new_timestamp,
+                    banner,
                 )
 
         ingest_btn.click(
             handle_ingest,
             [
                 doc_type_selector,
+                profile_selector,
                 file_upload,
                 title_input,
                 author_input,
@@ -456,6 +644,7 @@ def create_ingest_interface():
                 pattern_test_output,
                 doc_list_display,
                 library_timestamp,
+                last_job_banner,
             ],
         )
 
@@ -548,4 +737,4 @@ def create_ingest_interface():
             ],
         )
 
-    return doc_list_display
+    return doc_list_display, last_job_banner

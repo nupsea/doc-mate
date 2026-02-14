@@ -318,3 +318,66 @@ class PgresStore:
                         doc_lens[chunk_id] = doc_len
 
         return {"df": df, "tf": tf, "doc_lens": doc_lens, "N": N}
+
+    # ── Ingest job tracking ──────────────────────────────────────────
+
+    def create_ingest_job(self, job_id: str, slug: str, title: str, doc_type: str):
+        """Record a new ingestion job as 'running'."""
+        self.execute(
+            """
+            INSERT INTO ingest_jobs (job_id, slug, title, doc_type, status)
+            VALUES (%s, %s, %s, %s, 'running')
+            """,
+            (job_id, slug, title, doc_type),
+            commit=True,
+        )
+
+    def complete_ingest_job(self, job_id: str, result_summary: str):
+        """Mark a job as completed with a one-line summary."""
+        self.execute(
+            """
+            UPDATE ingest_jobs
+            SET status = 'completed', result_summary = %s, completed_at = NOW()
+            WHERE job_id = %s
+            """,
+            (result_summary, job_id),
+            commit=True,
+        )
+
+    def fail_ingest_job(self, job_id: str, error_message: str):
+        """Mark a job as failed with the error message."""
+        self.execute(
+            """
+            UPDATE ingest_jobs
+            SET status = 'failed', error_message = %s, completed_at = NOW()
+            WHERE job_id = %s
+            """,
+            (error_message, job_id),
+            commit=True,
+        )
+
+    def get_latest_ingest_job(self) -> dict | None:
+        """Return the most recent ingestion job, or None."""
+        row = self.execute(
+            """
+            SELECT job_id, slug, title, doc_type, status,
+                   error_message, result_summary, created_at, completed_at
+            FROM ingest_jobs
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            fetch="one",
+        )
+        if not row:
+            return None
+        return {
+            "job_id": row[0],
+            "slug": row[1],
+            "title": row[2],
+            "doc_type": row[3],
+            "status": row[4],
+            "error_message": row[5],
+            "result_summary": row[6],
+            "created_at": row[7],
+            "completed_at": row[8],
+        }

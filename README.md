@@ -380,6 +380,9 @@ psql -h localhost -U bookuser -d booksdb -c "SELECT COUNT(*), AVG(latency_ms) FR
 
 # View recent queries
 psql -h localhost -U bookuser -d booksdb -c "SELECT query, llm_relevance_score FROM query_metrics ORDER BY timestamp DESC LIMIT 10;"
+
+# Audit per-document consistency across BM25, Qdrant, and Graph stores
+uv run python scripts/audit_stores.py
 ```
 
 ## Migrating from Book-Mate

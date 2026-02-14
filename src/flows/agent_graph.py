@@ -278,6 +278,36 @@ def context_aggregator_node(state: AgentState) -> Dict[str, Any]:
             unique_rels = sorted(list(set(relations[slug])))
             combined.extend(unique_rels[:15])
 
+        # Episode context for conversation documents
+        if dtype == "conversation" and slug in passages:
+            try:
+                from src.graph.store import PostgresGraphStore
+                from src.content.store import PgresStore
+                ep_store = PostgresGraphStore()
+                doc_id = PgresStore()._resolve_doc_id(slug)
+                if doc_id:
+                    chunk_ids = [p['id'] for p in passages[slug]]
+                    episodes = ep_store.get_episodes_by_chunk_ids(doc_id, chunk_ids)
+                    if episodes:
+                        # Deduplicate by (speaker, topic)
+                        seen_ep = set()
+                        ep_lines = []
+                        for ep in episodes:
+                            key = (ep.get("speaker", ""), ep.get("topic", ""))
+                            if key in seen_ep:
+                                continue
+                            seen_ep.add(key)
+                            stance_str = f" (stance: {ep['stance']})" if ep.get("stance") else ""
+                            speaker = ep.get("speaker", "Unknown")
+                            topic = ep.get("topic", "general")
+                            summary = ep.get("summary", "")
+                            ep_lines.append(f"- {speaker} on '{topic}'{stance_str}: {summary}")
+                        if ep_lines:
+                            combined.append("\n[EPISODE CONTEXT]")
+                            combined.extend(ep_lines)
+            except Exception as e:
+                print(f"[RRG] Episode context failed for {slug}: {e}")
+
         if slug in passages:
             combined.append("\n[RELEVANT PASSAGES]")
             for i, p in enumerate(passages[slug], 1):

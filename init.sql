@@ -84,3 +84,19 @@ CREATE TABLE IF NOT EXISTS query_metrics (
 CREATE INDEX IF NOT EXISTS idx_query_metrics_timestamp ON query_metrics(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_query_metrics_doc_slug ON query_metrics(doc_slug);
 CREATE INDEX IF NOT EXISTS idx_query_metrics_success ON query_metrics(success);
+
+-- Ingestion job status tracking (survives browser disconnects)
+CREATE TABLE IF NOT EXISTS ingest_jobs (
+    job_id VARCHAR(100) PRIMARY KEY,
+    slug VARCHAR(50) NOT NULL,
+    title TEXT,
+    doc_type VARCHAR(20),
+    status VARCHAR(20) NOT NULL DEFAULT 'running',
+    error_message TEXT,
+    result_summary TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    completed_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_ingest_jobs_status ON ingest_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_ingest_jobs_created_at ON ingest_jobs(created_at DESC);

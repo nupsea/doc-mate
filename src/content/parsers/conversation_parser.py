@@ -184,6 +184,30 @@ class ConversationParser(DocumentParser):
 
         return turns
 
+    def _compute_adaptive_max_tokens(self, turn_token_counts: List[int], default_max_tokens: int) -> int:
+        """
+        Compute adaptive max_tokens based on conversation turn characteristics.
+
+        - < 20 turns: keep default (not enough data to judge)
+        - avg turn < 30 tokens (social chat): 1000 (wider windows, fewer chunks)
+        - avg turn 30-150 tokens: 500 (default)
+        - avg turn > 150 tokens (formal/long-form): 400 (tighter granularity)
+        """
+        if len(turn_token_counts) < 20:
+            return default_max_tokens
+
+        avg_turn = sum(turn_token_counts) / len(turn_token_counts)
+
+        if avg_turn < 30:
+            adaptive = 1000
+        elif avg_turn > 150:
+            adaptive = 400
+        else:
+            adaptive = 500
+
+        print(f"[CHUNK] Adaptive max_tokens={adaptive} (avg_turn={avg_turn:.0f}, {len(turn_token_counts)} turns)")
+        return adaptive
+
     def chunk(self, parsed_data: Optional[List[Dict]] = None, max_tokens: int = 500, overlap_turns: int = 2) -> List[Dict]:
         """
         Group speaker turns into logical chunks with overlap.
@@ -204,6 +228,9 @@ class ConversationParser(DocumentParser):
 
         # Pre-calculate token counts (performance optimization)
         turn_token_counts = [len(self.enc.encode(turn["text"])) for turn in parsed_data]
+
+        # Adaptive chunk sizing based on conversation characteristics
+        max_tokens = self._compute_adaptive_max_tokens(turn_token_counts, max_tokens)
 
         chunks = []
         chunk_index = 0

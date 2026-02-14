@@ -7,7 +7,7 @@ import os
 import threading
 from src.mcp_client.agent import BookMateAgent
 from src.ui.chat import create_chat_interface
-from src.ui.ingest import create_ingest_interface
+from src.ui.ingest import create_ingest_interface, _format_job_banner
 from src.ui.monitoring import create_monitoring_interface
 from src.flows.document_query import preload_retriever
 from src.content.db import DatabaseManager
@@ -162,7 +162,7 @@ def create_app():
 
             # Tab 2: Add New Document
             with gr.Tab("Add Document", id=1):
-                ingest_doc_list = create_ingest_interface()
+                ingest_doc_list, ingest_job_banner = create_ingest_interface()
 
             # Tab 3: Monitoring
             with gr.Tab("Monitoring", id=2):
@@ -178,30 +178,45 @@ def create_app():
                 (f"{title}", slug) for slug, title, _, _, _ in docs
             ]
 
+            # Refresh ingest job banner
+            from src.content.store import PgresStore
+            try:
+                banner = _format_job_banner(PgresStore().get_latest_ingest_job())
+            except Exception:
+                banner = ""
+
             print(
                 f"[DEBUG] Tab switched to: {evt.value}, refreshing with {len(docs)} documents"
             )
 
             if evt.value == 0 or evt.index == 0:
                 # Switching to Chat tab - refresh chat document list and dropdown
-                return new_list, gr.update(choices=new_choices), gr.update()
+                return new_list, gr.update(choices=new_choices), gr.update(), banner
             elif evt.value == 1 or evt.index == 1:
                 # Switching to Add Document tab - refresh ingest document list
-                return gr.update(), gr.update(), new_list
+                return gr.update(), gr.update(), new_list, banner
 
             # Refresh both to be safe
-            return new_list, gr.update(choices=new_choices), new_list
+            return new_list, gr.update(choices=new_choices), new_list, banner
 
         tabs.select(
-            refresh_on_tab_change, None, [doc_list, dropdown, ingest_doc_list]
+            refresh_on_tab_change, None, [doc_list, dropdown, ingest_doc_list, ingest_job_banner]
         )
 
         # Load document lists on startup
         def load_ingest_list():
             return format_document_list(get_available_documents())
 
+        def load_job_banner():
+            from src.content.store import PgresStore
+            try:
+                return _format_job_banner(PgresStore().get_latest_ingest_job())
+            except Exception:
+                return ""
+
         app.load(load_doc_list, None, doc_list)
         app.load(load_ingest_list, None, ingest_doc_list)
+        app.load(load_job_banner, None, ingest_job_banner)
 
     return app
 

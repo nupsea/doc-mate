@@ -21,6 +21,12 @@ DB_CONFIG = {
     "password": os.getenv("PG_PASS", "bookpass"),
     "host": os.getenv("PG_HOST", "localhost"),
     "port": os.getenv("PG_PORT", 5432),
+    # TCP keepalives: prevent idle pool connections from being dropped
+    # during long LLM calls (30-120s) in parallel ingestion
+    "keepalives": 1,
+    "keepalives_idle": 30,       # seconds before first probe
+    "keepalives_interval": 10,   # seconds between probes
+    "keepalives_count": 5,       # probes before declaring dead
 }
 
 class DatabaseManager:
@@ -52,23 +58,53 @@ class DatabaseManager:
             logger.info("[DB] Connection pool closed")
 
     @classmethod
+    def _is_conn_alive(cls, conn) -> bool:
+        """Lightweight check: is this connection still usable?"""
+        if conn.closed:
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+            # Clear any implicit transaction state from the probe
+            conn.rollback()
+            return True
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            return False
+
+    @classmethod
     @contextlib.contextmanager
     def get_connection(cls) -> Generator[psycopg2.extensions.connection, None, None]:
         """
         Context manager to get a connection from the pool.
         Yields a raw psycopg2 connection.
         Automatically returns it to the pool on exit.
+        Replaces stale connections transparently.
         """
         pool = cls.get_pool()
         conn = pool.getconn()
+
+        # Health check: replace stale connections from the pool
+        if not cls._is_conn_alive(conn):
+            logger.warning("[DB] Stale connection detected, replacing")
+            pool.putconn(conn, close=True)
+            conn = pool.getconn()
+
         try:
             yield conn
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            # Connection died mid-operation -- close it so the pool
+            # doesn't recycle a broken connection
+            logger.warning(f"[DB] Connection error during operation: {e}")
+            pool.putconn(conn, close=True)
+            conn = None  # prevent double-putconn in finally
+            raise
         except Exception:
-            # If an error occurs, rollback to be safe before returning
             conn.rollback()
             raise
         finally:
-            pool.putconn(conn)
+            if conn is not None:
+                pool.putconn(conn)
 
 def async_db_task(func):
     """
