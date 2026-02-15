@@ -3,12 +3,10 @@ Unit tests for ingestion profiles -- profile definitions, time estimation,
 registry, Ollama health check, and integration with document_ingest pipeline.
 """
 
-import asyncio
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from src.flows.ingest_profiles import (
-    IngestProfile,
     PROFILES,
     DEFAULT_PROFILE,
     check_ollama_available,

@@ -88,7 +88,7 @@ def test_adaptive_chunking_social_chat_e2e():
 
     # With adaptive sizing, social chat gets max_tokens=1000
     # so we expect far fewer chunks than with max_tokens=500
-    chunks_500 = parser.chunk(turns, max_tokens=500)  # already adaptive=1000
+    parser.chunk(turns, max_tokens=500)  # already adaptive=1000
     # To verify the adaptive path, manually chunk at 500 without adaptation
     # by bypassing the method -- just verify chunk count is reasonable
     # With 300 short turns at ~5 tokens each and max_tokens=1000,
@@ -242,7 +242,7 @@ def test_episode_store_get_by_chunk_ids():
 
         found = True
         print(f"  Queried {len(chunk_ids)} chunk IDs -> {len(matched)} episodes matched")
-        print(f"  Fake chunk ID -> 0 episodes (correct)")
+        print("  Fake chunk ID -> 0 episodes (correct)")
         break
 
     if not found:
@@ -318,7 +318,7 @@ def test_episode_context_in_aggregator():
         if "[EPISODE CONTEXT]" in context:
             found = True
             # Count episode lines
-            ep_lines = [l for l in context.split("\n") if l.startswith("- ") and " on '" in l]
+            ep_lines = [line for line in context.split("\n") if line.startswith("- ") and " on '" in line]
             print(f"  Doc: {slug}")
             print(f"  [EPISODE CONTEXT] found with {len(ep_lines)} episode lines")
             assert len(ep_lines) >= 1, "Expected at least 1 episode context line"
@@ -429,7 +429,6 @@ async def main():
     print("=" * 80)
 
     passed = 0
-    skipped = 0
     failed = 0
 
     tests_sync = [

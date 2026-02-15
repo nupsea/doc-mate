@@ -182,7 +182,7 @@ def main():
 
     # Orphaned Qdrant vectors
     if orphaned_qdrant:
-        print(f"ORPHANED QDRANT VECTORS (no matching document):")
+        print("ORPHANED QDRANT VECTORS (no matching document):")
         for slug, count in sorted(orphaned_qdrant.items()):
             print(f"  {slug}: {count} chunks")
         print()

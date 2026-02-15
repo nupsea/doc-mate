@@ -276,7 +276,7 @@ def _format_job_banner(job: dict | None) -> str:
     """Return a Markdown string describing the latest ingest job, or empty."""
     if not job:
         return ""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     created = job["created_at"]
     now = datetime.now(created.tzinfo) if created.tzinfo else datetime.now()
