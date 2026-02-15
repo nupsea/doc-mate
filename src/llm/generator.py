@@ -1,4 +1,5 @@
 import asyncio
+import random
 from collections import defaultdict
 from openai import AsyncOpenAI
 import tiktoken
@@ -54,9 +55,24 @@ DOC_PARAMS = {
 
 
 class SummaryGenerator:
-    def __init__(self, doc_type: str = 'book'):
-        self.client = AsyncOpenAI()
-        self.semaphore = asyncio.Semaphore(4)
+    def __init__(self, doc_type: str = 'book', provider: str = None):
+        from src.llm.config import LLMConfig
+        self.config = LLMConfig.from_env()
+        self.provider = provider or self.config.default_provider
+        
+        if self.provider == "local" or self.config.privacy_mode:
+            # Ensure /v1 for OpenAI-compatible API
+            base_url = self.config.ollama_base_url
+            if "/v1" not in base_url:
+                base_url = base_url.rstrip("/") + "/v1"
+            self.client = AsyncOpenAI(base_url=base_url, api_key="ollama")
+            self.model = self.config.ollama_model
+        else:
+            self.client = AsyncOpenAI(api_key=self.config.openai_api_key)
+            self.model = "gpt-4o-mini"
+
+        # RATE LIMIT FIX: Reduce concurrency from 4 -> 2 to avoid TPM 429 errors
+        self.semaphore = asyncio.Semaphore(2)
         self.doc_type = doc_type
         params = DOC_PARAMS.get(doc_type, DOC_PARAMS['book'])
 
@@ -99,15 +115,54 @@ class SummaryGenerator:
         return batches
 
     async def summarize_text_batch(self, text: str, batch_num: int = None):
-        """Summarize a batch of text."""
-        async with self.semaphore:
-            prompt = self.section_prompt.format(text=text)
-            resp = await self.client.chat.completions.create(
-                model="gpt-4o-mini",  # fast + cheap
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-            )
-            return str(resp.choices[0].message.content).strip()
+        """Summarize a batch of text with robust retry logic."""
+        max_retries = 5
+        retry_delay = 5 # seconds
+
+        # Jitter to desynchronize requests
+        await asyncio.sleep(random.uniform(0.1, 0.5))
+
+        for attempt in range(max_retries):
+            async with self.semaphore:
+                try:
+                    prompt = self.section_prompt.format(text=text)
+                    resp = await self.client.chat.completions.create(
+                        model=self.model,  # fast + cheap
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.3,
+                        timeout=120.0 # Prevent timeouts on large contexts
+                    )
+                    
+                    # Safety cooldown
+                    await asyncio.sleep(0.2)
+                    
+                    return str(resp.choices[0].message.content).strip()
+
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    is_transient = (
+                        "rate_limit" in error_msg or "429" in error_msg
+                        or "connection" in error_msg or "timeout" in error_msg or "timed out" in error_msg
+                        or "apiconnectionerror" in error_msg
+                        or "server_error" in error_msg or "500" in error_msg
+                        or "502" in error_msg or "503" in error_msg
+                    )
+
+                    if is_transient and attempt < max_retries - 1:
+                        is_rate_limit = "rate_limit" in error_msg or "429" in error_msg
+                        base = retry_delay if is_rate_limit else 10
+                        wait_time = base * (2 ** attempt)
+                        label = "Rate limit" if is_rate_limit else "Transient error"
+                        print(f"[Summary] {label} (Attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                        continue
+
+                    if attempt == max_retries - 1:
+                        print(f"[Summary Error] Failed after {max_retries} attempts: {e}")
+                        raise e
+
+                    print(f"[Summary Warning] Non-transient error: {e}. Retrying...")
+                    await asyncio.sleep(2)
 
     async def summarize_chapter(self, text, sid):
         """Summarize a single chapter, handling large texts by batching."""
@@ -133,19 +188,33 @@ class SummaryGenerator:
 
             # Summarize the combined summaries
             params = DOC_PARAMS.get(self.doc_type, DOC_PARAMS['book'])
-            async with self.semaphore:
-                prompt = f"""
+            
+            # Retry wrapper for final synthesis call
+            for attempt in range(5):
+                try:
+                    async with self.semaphore:
+                        prompt = f"""
 These are summaries of different parts of the same {params['unit']}.
 Combine them into 1-2 cohesive paragraphs that capture the key points.
 
 {combined_text}
 """
-                resp = await self.client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3,
-                )
-                summary = str(resp.choices[0].message.content).strip()
+                        resp = await self.client.chat.completions.create(
+                            model=self.model,
+                            messages=[{"role": "user", "content": prompt}],
+                            temperature=0.3,
+                        )
+                        summary = str(resp.choices[0].message.content).strip()
+                        break
+                except Exception as e:
+                    if attempt == 4:
+                        raise e
+                    error_msg = str(e).lower()
+                    is_rate_limit = "rate_limit" in error_msg or "429" in error_msg
+                    base = 5 if is_rate_limit else 10
+                    wait_time = base * (2 ** attempt)
+                    print(f"[Summary] Chapter synthesis error (Attempt {attempt+1}/5): {e}. Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
 
         return {
             "chapter_id": sid,
@@ -167,12 +236,27 @@ Combine them into 1-2 cohesive paragraphs that capture the key points.
         if len(batches) == 1:
             # Small enough to summarize directly
             prompt = self.overall_prompt.format(joined=joined)
-            resp = await self.client.chat.completions.create(
-                model="gpt-4o-mini",  # Use mini for cost efficiency
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-            )
-            return str(resp.choices[0].message.content).strip()
+            
+            # Use summarize_text_batch internal logic via direct call or just wrap here
+            # Wrapping logic for safety
+            for attempt in range(5):
+                try:
+                    async with self.semaphore:
+                        resp = await self.client.chat.completions.create(
+                            model=self.model,
+                            messages=[{"role": "user", "content": prompt}],
+                            temperature=0.3,
+                        )
+                        return str(resp.choices[0].message.content).strip()
+                except Exception as e:
+                    if attempt == 4:
+                        raise e
+                    error_msg = str(e).lower()
+                    is_rate_limit = "rate_limit" in error_msg or "429" in error_msg
+                    base = 5 if is_rate_limit else 10
+                    wait_time = base * (2 ** attempt)
+                    print(f"[Summary] Book summary error (Attempt {attempt+1}/5): {e}. Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
         else:
             # Document is large, batch the summaries
             print(f"Document is large ({len(batches)} batches), summarizing in parts...")
@@ -180,13 +264,25 @@ Combine them into 1-2 cohesive paragraphs that capture the key points.
 
             for i, batch in enumerate(batches):
                 prompt = self.overall_prompt.format(joined=batch)
-                async with self.semaphore:
-                    resp = await self.client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=0.3,
-                    )
-                    batch_summaries.append(str(resp.choices[0].message.content).strip())
+                for attempt in range(5):
+                    try:
+                        async with self.semaphore:
+                            resp = await self.client.chat.completions.create(
+                                model=self.model,
+                                messages=[{"role": "user", "content": prompt}],
+                                temperature=0.3,
+                            )
+                            batch_summaries.append(str(resp.choices[0].message.content).strip())
+                            break
+                    except Exception as e:
+                        if attempt == 4:
+                            raise e
+                        error_msg = str(e).lower()
+                        is_rate_limit = "rate_limit" in error_msg or "429" in error_msg
+                        base = 5 if is_rate_limit else 10
+                        wait_time = base * (2 ** attempt)
+                        print(f"[Summary] Batch {i} summary error (Attempt {attempt+1}/5): {e}. Retrying in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
 
             # Combine batch summaries into final summary
             if len(batch_summaries) == 1:
@@ -198,19 +294,100 @@ Combine them into 1-2 cohesive paragraphs that capture the key points.
             ])
 
             # Final synthesis
-            async with self.semaphore:
-                final_prompt = f"""
+            final_prompt = f"""
 These are summaries of different parts of the same document.
 Combine them into 2-3 cohesive paragraphs that capture the document's key themes and content.
 
 {combined}
 """
-                resp = await self.client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": final_prompt}],
-                    temperature=0.3,
-                )
-                return str(resp.choices[0].message.content).strip()
+            for attempt in range(5):
+                try:
+                    async with self.semaphore:
+                        resp = await self.client.chat.completions.create(
+                            model=self.model,
+                            messages=[{"role": "user", "content": final_prompt}],
+                            temperature=0.3,
+                        )
+                        return str(resp.choices[0].message.content).strip()
+                except Exception as e:
+                    if attempt == 4:
+                        raise e
+                    error_msg = str(e).lower()
+                    is_rate_limit = "rate_limit" in error_msg or "429" in error_msg
+                    base = 5 if is_rate_limit else 10
+                    wait_time = base * (2 ** attempt)
+                    print(f"[Summary] Final synthesis error (Attempt {attempt+1}/5): {e}. Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+
+    async def generate_arc_summaries(self, episodes: list, target_arcs: int = 12) -> list:
+        """
+        Cluster episodes into thematic arcs and summarize each arc.
+        Single LLM call that groups episodes into ~10-15 narrative arcs.
+
+        Args:
+            episodes: List of episode dicts with topic, summary, speaker, stance
+            target_arcs: Target number of arcs to produce
+
+        Returns:
+            List of {"chapter_id": N, "summary": "..."} dicts (reuses chapter_summaries schema)
+        """
+        if not episodes:
+            return []
+
+        # Build episode descriptions for the prompt
+        ep_lines = []
+        for i, ep in enumerate(episodes, 1):
+            speaker = ep.get("speaker", "Unknown")
+            topic = ep.get("topic", "")
+            stance = ep.get("stance", "")
+            summary = ep.get("summary", "")
+            turns = f"turns {ep.get('turn_start', '?')}-{ep.get('turn_end', '?')}"
+            ep_lines.append(f"{i}. [{turns}] {speaker} on '{topic}' ({stance}): {summary}")
+
+        episodes_text = "\n".join(ep_lines)
+
+        prompt = f"""You are analyzing a conversation that has been broken into {len(episodes)} episodes.
+Group these episodes into {target_arcs} thematic arcs (narrative chapters).
+For each arc, provide a 2-3 sentence summary capturing the key discussion points and outcomes.
+
+Episodes:
+{episodes_text}
+
+Return exactly one JSON array of objects, each with "chapter_id" (integer, starting at 1) and "summary" (string).
+Output ONLY the JSON array, no other text."""
+
+        for attempt in range(5):
+            try:
+                async with self.semaphore:
+                    resp = await self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.3,
+                        timeout=120.0
+                    )
+                    content = str(resp.choices[0].message.content).strip()
+
+                    # Parse JSON from response
+                    import json
+                    # Handle markdown code blocks
+                    if content.startswith("```"):
+                        content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                    arcs = json.loads(content)
+
+                    print(f"[SUMMARY] Generated {len(arcs)} arc summaries from {len(episodes)} episodes")
+                    return arcs
+            except Exception as e:
+                if attempt == 4:
+                    print(f"[SUMMARY] Arc summary generation failed: {e}")
+                    return []
+                error_msg = str(e).lower()
+                is_rate_limit = "rate_limit" in error_msg or "429" in error_msg
+                base = 5 if is_rate_limit else 10
+                wait_time = base * (2 ** attempt)
+                print(f"[SUMMARY] Arc summary error (Attempt {attempt+1}/5): {e}. Retrying in {wait_time}s...")
+                await asyncio.sleep(wait_time)
+
+        return []
 
     async def summarize_hierarchy(self, chunks):
         """
@@ -222,7 +399,15 @@ Combine them into 2-3 cohesive paragraphs that capture the document's key themes
         # Group chunks by chapter_id (sid)
         section_map = defaultdict(list)
         for c in chunks:
-            sid = int(c["id"].split("_")[1])  # parse sid from id
+            # Robust parsing: sid is the 3rd-to-last part of the ID
+            # ID format: {slug}_{sid}_{cid}_{hash}
+            # e.g. "mini_iliad_01_001_abc123" -> "01"
+            parts = c["id"].split("_")
+            try:
+                sid = int(parts[-3])
+            except (ValueError, IndexError):
+                # Fallback to 1 if we can't parse or format is different
+                sid = 1
             section_map[sid].append(c["text"])
 
         # Join chapter text

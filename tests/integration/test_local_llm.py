@@ -78,8 +78,6 @@ async def test_local_llm():
     print("=" * 80)
     print(f"\nTotal tests: {len(test_cases)}")
     print(f"Model: {agent.llm_provider.model}")
-    print(f"Temperature: {agent._get_temperature_for_provider()}")
-    print(f"Max tokens: {agent._get_max_tokens_for_provider()}")
     print(f"Using simple prompt: {agent.llm_provider.provider_name == 'local'}")
     print("=" * 80)
 

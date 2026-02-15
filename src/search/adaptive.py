@@ -113,14 +113,14 @@ class AdaptiveRetriever(FusionRetriever):
         # Long descriptive queries benefit from semantic
         return 0.6  # Slightly more semantic weight
 
-    def search(
-        self,
+    def search(self,
         query: str,
         topk: int = 7,
         use_preprocessing: bool = True,
         use_dynamic_alpha: bool = False,
         candidate_multiplier: int = 3,
         doc_slug: str = None,
+        hint_entities: list[str] = None,
     ):
         """
         Adaptive search with query preprocessing.
@@ -135,6 +135,7 @@ class AdaptiveRetriever(FusionRetriever):
             use_dynamic_alpha: Whether to use dynamic alpha (recommended: False, use fixed α=0.7)
             candidate_multiplier: Retrieve topk * multiplier candidates before fusion
             doc_slug: If provided, only search within this document (e.g., 'aiw', 'gtr')
+            hint_entities: Optional hint entities from router to seed graph search
 
         Returns:
             List of chunk IDs
@@ -161,13 +162,51 @@ class AdaptiveRetriever(FusionRetriever):
         embed_results = self.vec.search(query, candidate_count, doc_slug=doc_slug)
         bm25_results = self.bm25.search(processed_query, candidate_count, doc_slug=doc_slug)
 
-        # Apply weighted fusion with dynamic alpha
-        scores = {}
-        for rank, c in enumerate(bm25_results, start=1):
-            scores[c["id"]] = scores.get(c["id"], 0) + alpha * (1.0 / rank)
+        # Graph retrieval (third signal)
+        graph_results = []
+        if doc_slug:
+            try:
+                from src.graph.retriever import ConversationGraphRetriever
+                # Use ConversationGraphRetriever as it handles both basic and episode queries
+                # (It falls back to basic entity search if no episodes match)
+                graph_retriever = ConversationGraphRetriever()
+                graph_results = graph_retriever.search(query, doc_slug, candidate_count, hint_entities=hint_entities)
+                logger.info(f"Graph retrieval found {len(graph_results)} results for '{query}' in {doc_slug}")
+            except Exception as e:
+                logger.warning(f"Graph retrieval failed: {e}")
 
+        # Determine Fusion Weights
+        if graph_results:
+            # Triple Hybrid Fusion
+            # BM25: 0.35 (Keywords)
+            # Vector: 0.35 (Semantics)
+            # Graph: 0.30 (Structure/Relation)
+            alpha_bm25 = 0.35
+            alpha_vec = 0.35
+            alpha_graph = 0.30
+        else:
+            # Dual Hybrid (Classic)
+            alpha_bm25 = alpha
+            alpha_vec = 1.0 - alpha
+            alpha_graph = 0.0
+
+        # Apply weighted fusion (RRF-style reciprocal rank or simple score sum? Using Rank Fusion here)
+        scores = {}
+        
+        # BM25 Scores
+        for rank, c in enumerate(bm25_results, start=1):
+            scores[c["id"]] = scores.get(c["id"], 0) + alpha_bm25 * (1.0 / rank)
+
+        # Vector Scores
         for rank, c in enumerate(embed_results, start=1):
-            scores[c["id"]] = scores.get(c["id"], 0) + (1 - alpha) * (1.0 / rank)
+            scores[c["id"]] = scores.get(c["id"], 0) + alpha_vec * (1.0 / rank)
+            
+        # Graph Scores
+        if graph_results:
+            for rank, c in enumerate(graph_results, start=1):
+                # Graph results come with their own scores, but for fusion consistency 
+                # we treat them by rank here to normalize with others
+                scores[c["id"]] = scores.get(c["id"], 0) + alpha_graph * (1.0 / rank)
 
         # Sort and return top-k
         sorted_results = sorted(scores.items(), key=lambda x: -x[1])[:topk]

@@ -35,7 +35,7 @@ class LLMConfig:
 
         # Local (Ollama)
         OLLAMA_BASE_URL: Ollama API base URL (default: http://localhost:11434/v1)
-        OLLAMA_MODEL: Model name (default: llama3.2:3b, auto-switches to 8b for comparisons)
+        OLLAMA_MODEL: Model name (default: granite3.2:8b)
     """
 
     # Provider selection
@@ -55,8 +55,12 @@ class LLMConfig:
     anthropic_model: str = "claude-3-5-sonnet-20241022"
 
     # Local (Ollama) configuration
-    ollama_base_url: str = "http://localhost:11434/v1"
-    ollama_model: str = "llama3.2:3b"  # Fast default, auto-switches to 8b for comparisons
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "granite3.2:8b"
+
+    # Specialized Models (default to primary unless overridden)
+    router_model: str = "gpt-4o-mini"
+    extractor_model: str = "gpt-4o-mini"
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
@@ -71,6 +75,7 @@ class LLMConfig:
             >>> print(config.default_provider)  # "openai" or from env
         """
         provider = os.getenv("LLM_PROVIDER", "openai")
+        openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
         # Auto-disable judge for local LLM unless explicitly enabled
         default_enable_judge = "false" if provider == "local" else "true"
@@ -84,15 +89,19 @@ class LLMConfig:
 
             # OpenAI
             openai_api_key=os.getenv("OPENAI_API_KEY"),
-            openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            openai_model=openai_model,
 
             # Anthropic
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
             anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
 
             # Local (Ollama)
-            ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
-            ollama_model=os.getenv("OLLAMA_MODEL", "llama3.2:3b"),
+            ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+            ollama_model=os.getenv("OLLAMA_MODEL", "granite3.2:8b"),
+
+            # Specialized Models
+            router_model=os.getenv("ROUTER_MODEL", openai_model),
+            extractor_model=os.getenv("EXTRACTOR_MODEL", openai_model),
         )
 
     def validate(self) -> None:

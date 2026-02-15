@@ -2,6 +2,8 @@
 Chat interface component.
 """
 
+import os
+
 import gradio as gr
 from src.monitoring.metrics import metrics_collector
 
@@ -71,9 +73,12 @@ def update_model_choices(provider, privacy_mode):
 
     if force_local or provider == "local":
         return gr.update(
-            choices=[("Llama 3.2 3B (Fast Local)", "llama3.2:3b"), ("Llama 3.1 8B (Local)", "llama3.1:8b")],
-            value="llama3.2:3b",
-            info="Local Ollama model - 3B is faster, 8B is smarter"
+            choices=[
+                ("Granite 3.2 8B (Recommended)", "granite3.2:8b"),
+                ("Llama 3.2 3B (Faster, less accurate)", "llama3.2:3b"),
+            ],
+            value="granite3.2:8b",
+            info="Granite 3.2 optimized for RAG and tool calling"
         ), gr.update(value="local", interactive=not force_local)
     else:  # openai (normal or ephemeral modes)
         return gr.update(
@@ -110,27 +115,40 @@ def create_chat_interface(ui):
                         scale=1,
                     )
 
+                    default_provider = os.getenv("LLM_PROVIDER", "openai")
+                    if default_provider == "local":
+                        default_model_choices = [
+                            ("Granite 3.2 8B (Recommended)", "granite3.2:8b"),
+                            ("Llama 3.2 3B (Faster, less accurate)", "llama3.2:3b"),
+                        ]
+                        default_model = "granite3.2:8b"
+                        default_model_info = "Granite 3.2 optimized for RAG and tool calling"
+                    else:
+                        default_model_choices = [
+                            ("GPT-4o Mini (Fast & Cheap)", "gpt-4o-mini"),
+                            ("GPT-4o (Balanced)", "gpt-4o"),
+                            ("GPT-4 Turbo", "gpt-4-turbo"),
+                            ("GPT-3.5 Turbo (Fastest)", "gpt-3.5-turbo"),
+                        ]
+                        default_model = "gpt-4o-mini"
+                        default_model_info = "Select model for chat"
+
                     provider_dropdown = gr.Dropdown(
                         choices=[
                             ("OpenAI (API)", "openai"),
                             ("Local Ollama", "local"),
                         ],
-                        value="openai",
+                        value=default_provider,
                         label="Provider",
                         info="Select LLM provider",
                         scale=0.85,
                     )
 
                     model_dropdown = gr.Dropdown(
-                        choices=[
-                            ("GPT-4o Mini (Fast & Cheap)", "gpt-4o-mini"),
-                            ("GPT-4o (Balanced)", "gpt-4o"),
-                            ("GPT-4 Turbo", "gpt-4-turbo"),
-                            ("GPT-3.5 Turbo (Fastest)", "gpt-3.5-turbo"),
-                        ],
-                        value="gpt-4o-mini",
+                        choices=default_model_choices,
+                        value=default_model,
                         label="Model",
-                        info="Select model for chat",
+                        info=default_model_info,
                         scale=0.85,
                     )
 

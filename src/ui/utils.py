@@ -6,20 +6,21 @@ import re
 from src.content.store import PgresStore
 
 
-def get_available_documents():
+def get_available_documents(include_ephemeral: bool = True):
     """Fetch list of documents from database with slug, title, author, chunks, and added_at."""
     try:
         store = PgresStore()
-        with store.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT slug, title, author, num_chunks, added_at
-                FROM documents
-                ORDER BY added_at DESC
-            """
-            )
-            docs = cur.fetchall()
-        return docs
+        query = """
+            SELECT slug, title, author, num_chunks, added_at
+            FROM documents
+        """
+        
+        if not include_ephemeral:
+            query += " WHERE is_ephemeral = FALSE"
+            
+        query += " ORDER BY added_at DESC"
+        
+        return store.execute(query, fetch="all")
     except Exception as e:
         print(f"Error fetching documents: {e}")
         return []
@@ -54,11 +55,9 @@ def validate_slug(slug: str) -> tuple[bool, str]:
     # Check if slug already exists
     try:
         store = PgresStore()
-        with store.conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM documents WHERE slug = %s", (slug,))
-            count = cur.fetchone()[0]
-            if count > 0:
-                return False, f"Slug '{slug}' already exists. Choose a different one."
+        row = store.execute("SELECT COUNT(*) FROM documents WHERE slug = %s", (slug,), fetch="one")
+        if row and row[0] > 0:
+            return False, f"Slug '{slug}' already exists. Choose a different one."
     except Exception as e:
         return False, f"Error checking slug: {str(e)}"
 
@@ -126,9 +125,8 @@ def extract_chapter_info_from_chunks(slug: str):
         
         # We'll use the store to get chunk IDs for this document
         store = PgresStore()
-        with store.conn.cursor() as cur:
-            cur.execute("SELECT chunk_id FROM bm25_doc_lens WHERE chunk_id LIKE %s", (f"{slug}_%",))
-            doc_chunks = [row[0] for row in cur.fetchall()]
+        rows = store.execute("SELECT chunk_id FROM bm25_doc_lens WHERE chunk_id LIKE %s", (f"{slug}_%",), fetch="all")
+        doc_chunks = [row[0] for row in rows] if rows else []
 
         if not doc_chunks:
             return {"status": "error", "message": f"No chunks found for document '{slug}'"}
@@ -194,7 +192,7 @@ format_book_list = format_document_list
 def delete_document(slug: str) -> tuple[bool, str, int]:
     """
     Delete a document and all its associated data from:
-    - PostgreSQL (documents table - cascades to summaries and index)
+    - PostgreSQL (documents row + cascaded summaries/graph + explicit BM25 cleanup)
     - Qdrant vector store
 
     Returns:
@@ -205,34 +203,23 @@ def delete_document(slug: str) -> tuple[bool, str, int]:
         from qdrant_client import models
 
         store = PgresStore()
-        retriever = FusionRetriever()
 
         # Check if document exists and get info
-        with store.conn.cursor() as cur:
-            cur.execute("SELECT title, num_chunks FROM documents WHERE slug = %s", (slug,))
-            result = cur.fetchone()
-            if not result:
-                return False, f"Document '{slug}' not found", 0
+        result = store.execute("SELECT title, num_chunks FROM documents WHERE slug = %s", (slug,), fetch="one")
+        if not result:
+            return False, f"Document '{slug}' not found", 0
 
-            doc_title = result[0]
-            deleted_chunks = result[1] or 0
+        doc_title = result[0]
+        deleted_chunks = result[1] or 0
 
-        # Delete from PostgreSQL (CASCADE handles summaries, BM25 index needs manual cleanup if no FK)
-        # Note: bm25_index uses chunk_id which starts with slug_
-        with store.conn.cursor() as cur:
-            # First clean up BM25 tables since they use chunk_id strings, not doc_id FK
-            cur.execute("DELETE FROM bm25_index WHERE chunk_id LIKE %s", (f"{slug}_%",))
-            cur.execute("DELETE FROM bm25_doc_lens WHERE chunk_id LIKE %s", (f"{slug}_%",))
-            
-            # Now delete from main documents table
-            cur.execute("DELETE FROM documents WHERE slug = %s", (slug,))
-            store.conn.commit()
+        # Delete from PostgreSQL (handles cascade + BM25 cleanup)
+        store.delete_document(slug)
 
         # Delete from Qdrant
         qdrant_success = True
         qdrant_error = ""
         try:
-            # FusionRetriever doesn't have qdrant_client directly, it's in vec.qdrant
+            retriever = FusionRetriever()
             retriever.vec.qdrant.delete(
                 collection_name=retriever.vec.COLLECTION,
                 points_selector=models.Filter(

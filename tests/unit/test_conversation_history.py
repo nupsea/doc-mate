@@ -2,6 +2,7 @@
 Test conversation history preservation across mode switches
 """
 import asyncio
+import pytest
 
 
 def check_should_clear_history(old_mode: str, new_mode: str) -> tuple[bool, bool, bool]:
@@ -17,7 +18,9 @@ def check_should_clear_history(old_mode: str, new_mode: str) -> tuple[bool, bool
     return changed, old_ephemeral, new_ephemeral
 
 
-async def test_conversation_history_logic():
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"])
+async def test_conversation_history_logic(anyio_backend):
     """Test that conversation history is cleared only when switching FROM ephemeral TO non-ephemeral"""
     print("="*80)
     print("TEST: Conversation History Preservation Logic")

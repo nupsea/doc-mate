@@ -230,14 +230,7 @@ class MarkdownParser(DocumentParser):
         - Prefer full sections if they fit in max_tokens
         - Split large sections with overlap
         - Keep code blocks intact when possible
-
-        Args:
-            parsed_data: Optional pre-parsed sections
-            max_tokens: Maximum tokens per chunk
-            overlap: Token overlap between chunks
-
-        Returns:
-            List of chunk dictionaries
+        - Reconstruct broken code blocks in chunks
         """
         if parsed_data is None:
             parsed_data = self.parse()
@@ -276,25 +269,70 @@ class MarkdownParser(DocumentParser):
 
                 for sub_chunk, sub_chunk_tokens in sub_chunks:
                     chunk_in_section += 1
-                    chunk_hash = self.simple_hash(sub_chunk)
+                    
+                    # Reconstruction logic: Fix split code blocks
+                    reconstructed_text = self.reconstruct_code_blocks(sub_chunk)
+                    
+                    chunk_hash = self.simple_hash(reconstructed_text)
                     chunk_id = f"{self.slug}_{section_num:02d}_{chunk_in_section:03d}_{chunk_hash}"
 
                     all_chunks.append({
                         "id": chunk_id,
-                        "text": sub_chunk,
+                        "text": reconstructed_text,
                         "hash": chunk_hash,
-                        "num_chars": len(sub_chunk),
-                        "num_tokens": sub_chunk_tokens,  # Use pre-calculated tokens
+                        "num_chars": len(reconstructed_text),
+                        "num_tokens": len(self.enc.encode(reconstructed_text)),
                         "metadata": {
                             "section": section["section"],
                             "heading": section["heading"],
-                            "has_code": section.get("has_code", False),
+                            "has_code": self._has_code(reconstructed_text),
                             "has_table": section.get("has_table", False),
                             "is_partial": True
                         }
                     })
 
         return all_chunks
+
+    def reconstruct_code_blocks(self, text: str) -> str:
+        """
+        Reconstruct code blocks that were split during chunking.
+        Ensures any opened code fence is closed, and any closed fence was opened.
+        """
+        # Count code fences
+        fences = re.findall(r'```', text)
+        if len(fences) % 2 == 0:
+            return text
+
+        # Unbalanced fences found. 
+        # Check if it starts with a closing fence (split from previous chunk)
+        # or ends with an opening fence (split to next chunk).
+        
+        lines = text.split('\n')
+        
+        # Scenario 1: Chunk starts mid-code-block (no opening fence in this chunk)
+        # Detect if first fence is a closing one
+        first_fence_idx = -1
+        for i, line in enumerate(lines):
+            if '```' in line:
+                first_fence_idx = i
+                break
+        
+        # If text contains code keywords before first fence, it likely needs an opening fence
+        if first_fence_idx != -1 and first_fence_idx > 0:
+            # Heuristic: if there's a lot of indented text or code keywords before first fence
+            # and first fence is just ``` (no language)
+            pre_text = '\n'.join(lines[:first_fence_idx])
+            if self._has_code(pre_text) and lines[first_fence_idx].strip() == '```':
+                text = "```text\n" + text
+        
+        # Scenario 2: Chunk ends mid-code-block (unclosed fence)
+        # Check total fences again after Scenario 1 fix
+        fences_count = text.count('```')
+        if fences_count % 2 != 0:
+            # Close the block
+            text = text.strip() + "\n```"
+            
+        return text
 
     def _chunk_text(self, text: str, max_tokens: int, overlap: int) -> List[tuple]:
         """

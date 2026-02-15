@@ -4,14 +4,21 @@
 
 ```
 tests/
-├── unit/              # Unit tests (pytest)
+├── unit/              # Unit tests (logic, parsing, logic-only)
+│   ├── test_chat_export_parsing.py
+│   ├── test_conversation_history.py
 │   ├── test_pattern_builder.py
-│   ├── test_pdf_reader.py
-│   └── test_search.py
-└── integration/       # Integration tests (requires services)
-    ├── test_agent_tool_calling.py
-    ├── test_local_llm.py
-    └── test_local_llm_edge_cases.py
+│   └── ...
+├── integration/       # Integration tests (requires services: Postgres, Qdrant, Ollama)
+│   ├── test_agent_basic.py
+│   ├── test_agent_conversation_intelligence.py (New: Modular RRG)
+│   ├── test_agent_homer_comprehensive.py (New: Iliad/Odyssey Graph)
+│   ├── test_local_grounding_graph.py
+│   └── ...
+└── debug/             # Debugging scripts for inspecting graph/DB
+    ├── debug_gossip_entities.py
+    ├── inspect_graph.py
+    └── ...
 ```
 
 ## Running Tests
@@ -23,27 +30,23 @@ pytest tests/unit/ -v
 
 ### Integration Tests
 
-#### OpenAI Agent Tests
+Ensure your `.env` is loaded and services are running.
+
+#### Agent Comprehensive Tests
 ```bash
-# Requires: OPENAI_API_KEY, PostgreSQL, Qdrant, indexed books
-source .env && python -m tests.integration.test_agent_tool_calling
+# Modular RRG and Type-Aware Intelligence
+PYTHONPATH=. uv run python tests/integration/test_agent_conversation_intelligence.py
+PYTHONPATH=. uv run python tests/integration/test_agent_homer_comprehensive.py
 ```
 
-#### Local LLM Tests
+#### Graph & Grounding Tests
 ```bash
-# Requires: Ollama running, PostgreSQL, Qdrant, indexed books
-# Set LLM_PROVIDER=local in .env
-python -m tests.integration.test_local_llm
+# Graph relationship tests
+PYTHONPATH=. uv run python tests/integration/test_agent_graph_knowledge.py
 
-# Edge case tests (unit-style, no services needed)
-python -m tests.integration.test_local_llm_edge_cases
+# Local model grounding tests
+PYTHONPATH=. uv run python tests/integration/test_local_grounding_graph.py
 ```
 
-## Coverage
-
-**Unit**: Pattern builder, PDF reader, search components
-
-**Integration**:
-- OpenAI agent tool calling (comprehensive, ~5 min)
-- Local LLM function calling (8 tests, ~2 min)
-- Local LLM edge cases (parameter normalization, prompts, temperature)
+## Debugging
+Use the scripts in `tests/debug/` to inspect the Knowledge Graph content directly in the database.

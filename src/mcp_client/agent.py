@@ -31,7 +31,11 @@ class DocMateAgent:
             self.provider_name = "local"
 
         self.router = ModelRouter()
-        self.llm_provider = self.router.get_provider(self.provider_name)
+        # Strictly disable fallback if internal_mode is requested
+        self.llm_provider = self.router.get_provider(
+            self.provider_name, 
+            fallback=not internal_mode
+        )
 
         if model:
             self.llm_provider.model = model
@@ -40,7 +44,15 @@ class DocMateAgent:
         self.ephemeral = ephemeral
         self.internal_mode = internal_mode
 
-        if not self.ephemeral:
+        import os
+        from src.monitoring.tracer import disable_tracing
+        
+        if self.ephemeral:
+            os.environ["DISABLE_TRACING"] = "true"
+            disable_tracing()
+        else:
+            if "DISABLE_TRACING" in os.environ:
+                del os.environ["DISABLE_TRACING"]
             init_phoenix_tracing()
 
         if self.config.enable_judge and not self.ephemeral:
@@ -54,11 +66,10 @@ class DocMateAgent:
             from src.content.store import PgresStore
 
             store = PgresStore()
-            with store.conn.cursor() as cur:
-                cur.execute(
-                    "SELECT slug, title, author, doc_type FROM documents ORDER BY title"
-                )
-                docs = cur.fetchall()
+            docs = store.execute(
+                "SELECT slug, title, author, doc_type FROM documents ORDER BY title",
+                fetch="all"
+            )
 
             if not docs:
                 return "No documents currently available in the library.", {}, {"book"}
@@ -111,6 +122,7 @@ class DocMateAgent:
         self,
         user_message: str,
         conversation_history: list = None,
+        selected_doc: str = None,
     ) -> tuple[str, list, str]:
         """
         Send a message and let LangGraph handle the reasoning/tool loop.
@@ -141,7 +153,7 @@ class DocMateAgent:
                     "provider": self.llm_provider.provider_name,
                     "model": self.llm_provider.model,
                     "doc_types": doc_types,
-                    "selected_doc_slug": "" # Optional future expansion
+                    "selected_doc_slug": selected_doc or "",
                 })
                 
                 # 4. Extract final message

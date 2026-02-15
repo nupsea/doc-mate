@@ -54,6 +54,8 @@ class ConversationParser(DocumentParser):
             r'^\s*\[(\d{1,2}/\d{1,2}/\d{2,4},\s*\d{1,2}:\s*\d{2}(?::\s*\d{2})?\s*(?:[ap]m)?)\]\s*([^:\[\]]+?):\s*(.+)$',
             # "[00:12:34] Alice: message"
             r'^\s*\[(\d{2}:\d{2}:\d{2})\]\s*([^:\[\]]+?):\s*(.+)$',
+            # "[09:00] Alice: message" (HH:MM)
+            r'^\s*\[(\d{2}:\d{2})\]\s*([^:\[\]]+?):\s*(.+)$',
             # "Alice (14:30): message"
             r'^([^(]+?)\s*\((\d{2}:\d{2})\):\s*(.+)$',
             # "Alice: message" (catch-all, last resort)
@@ -120,7 +122,13 @@ class ConversationParser(DocumentParser):
 
             # Try to match turn patterns
             matched = False
-            for pattern in self.turn_patterns:
+            
+            # Prioritize custom split_pattern if provided
+            patterns_to_try = [self.split_pattern] + self.turn_patterns if self.split_pattern else self.turn_patterns
+            
+            for pattern in patterns_to_try:
+                if not pattern: 
+                    continue
                 match = re.match(pattern, line)
                 if match:
                     # Save previous turn
@@ -151,6 +159,11 @@ class ConversationParser(DocumentParser):
                         current_speaker = groups[0]
                         current_timestamp = None
                         current_text = [groups[1]]
+                    elif len(groups) == 1:
+                        # Only message? Not really a conversation turn then, but fallback
+                        current_speaker = "Unknown"
+                        current_timestamp = None
+                        current_text = [groups[0]]
 
                     matched = True
                     break
@@ -170,6 +183,30 @@ class ConversationParser(DocumentParser):
             })
 
         return turns
+
+    def _compute_adaptive_max_tokens(self, turn_token_counts: List[int], default_max_tokens: int) -> int:
+        """
+        Compute adaptive max_tokens based on conversation turn characteristics.
+
+        - < 20 turns: keep default (not enough data to judge)
+        - avg turn < 30 tokens (social chat): 1000 (wider windows, fewer chunks)
+        - avg turn 30-150 tokens: 500 (default)
+        - avg turn > 150 tokens (formal/long-form): 400 (tighter granularity)
+        """
+        if len(turn_token_counts) < 20:
+            return default_max_tokens
+
+        avg_turn = sum(turn_token_counts) / len(turn_token_counts)
+
+        if avg_turn < 30:
+            adaptive = 1000
+        elif avg_turn > 150:
+            adaptive = 400
+        else:
+            adaptive = 500
+
+        print(f"[CHUNK] Adaptive max_tokens={adaptive} (avg_turn={avg_turn:.0f}, {len(turn_token_counts)} turns)")
+        return adaptive
 
     def chunk(self, parsed_data: Optional[List[Dict]] = None, max_tokens: int = 500, overlap_turns: int = 2) -> List[Dict]:
         """
@@ -191,6 +228,9 @@ class ConversationParser(DocumentParser):
 
         # Pre-calculate token counts (performance optimization)
         turn_token_counts = [len(self.enc.encode(turn["text"])) for turn in parsed_data]
+
+        # Adaptive chunk sizing based on conversation characteristics
+        max_tokens = self._compute_adaptive_max_tokens(turn_token_counts, max_tokens)
 
         chunks = []
         chunk_index = 0

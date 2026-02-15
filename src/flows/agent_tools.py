@@ -126,5 +126,62 @@ def get_structure(doc_identifier: str) -> str:
         output += f"- {chap['chapter_id']}: {chap['summary']}\n"
     return output
 
+
+@tool
+def explore_entity_graph(entity_name: str, doc_identifier: str) -> str:
+    """
+    Explore the knowledge graph for a specific entity to find relationships and context.
+    Use this to answer "Who is X?", "How is X related to Y?", or "Tell me about X's relationships".
+    
+    Args:
+        entity_name: Name of the entity (person, place, concept) to explore.
+        doc_identifier: The document SLUG.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"TOOL CALL: explore_entity_graph(entity='{entity_name}', doc='{doc_identifier}')")
+
+    from src.graph.store import PostgresGraphStore
+    store = PostgresGraphStore()
+    
+    doc_id = store._resolve_doc_id(doc_identifier)
+    if not doc_id:
+        return f"Error: Document '{doc_identifier}' not found."
+        
+    # Find entity ID
+    name_map = store.find_entities_by_names(doc_id, [entity_name])
+    if not name_map:
+        return f"Entity '{entity_name}' not found in the graph for '{doc_identifier}'."
+        
+    entity_id = list(name_map.values())[0]
+    
+    # Get neighborhood (1-hop by default, 2-hop if sparse)
+    related = store.find_related_entities(entity_id, hops=1)
+    
+    # If 1-hop is sparse, expand to 2-hop for more context
+    if len(related) < 3:
+        related = store.find_related_entities(entity_id, hops=2)
+    
+    if not related:
+        return f"Entity '{entity_name}' exists but has no recorded relationships."
+        
+    # Format output
+    output = f"--- Knowledge Graph: {entity_name} ({doc_identifier}) ---\n"
+    
+    # Group by relation type
+    relations = {}
+    for r in related:
+        rtype = r['relation_type']
+        if rtype not in relations:
+            relations[rtype] = []
+        relations[rtype].append(f"{r['name']} ({r['entity_type']})")
+        
+    for rtype, targets in relations.items():
+        output += f"- {rtype}: {', '.join(targets)}\n"
+        
+    logger.info(f"TOOL RESULT: Found {len(related)} related entities for '{entity_name}'. Output length: {len(output)} chars.")
+    return output
+
+
 # List of tools to bind to the LLM
-ALL_TOOLS = [search_multiple_documents, search_document, get_summary, get_structure]
+ALL_TOOLS = [search_multiple_documents, search_document, get_summary, get_structure, explore_entity_graph]

@@ -178,11 +178,50 @@ class TestFusionRetrieverInit:
         retriever = FusionRetriever(alpha=0.9)
         assert retriever.alpha == 0.9
 
-    def test_custom_bm25_index_path(self):
-        """Test custom BM25 index path."""
-        custom_path = "/tmp/custom_bm25.pkl"
-        retriever = FusionRetriever(bm25_index_path=custom_path)
-        assert retriever.bm25_index_path == custom_path
+
+class TestSimpleTokenize:
+    """Test BM25 tokenizer filters junk and stopwords."""
+
+    def test_excludes_pure_numbers(self):
+        """Numbers like page counts, timestamps, IDs should not be indexed."""
+        from src.search.bm25 import simple_tokenize
+
+        tokens = simple_tokenize("Chapter 3 has 0000008023 references and 42 pages")
+        assert all(not t.isdigit() for t in tokens), f"Numeric tokens found: {[t for t in tokens if t.isdigit()]}"
+
+    def test_excludes_single_characters(self):
+        """Single-char residue from contractions (don't -> t, it's -> s) should be filtered."""
+        from src.search.bm25 import simple_tokenize
+
+        tokens = simple_tokenize("It's a dog's life and I can't believe it")
+        single_chars = [t for t in tokens if len(t) == 1]
+        assert single_chars == [], f"Single-char tokens found: {single_chars}"
+
+    def test_excludes_stopwords(self):
+        """Common English stopwords should not appear in tokens."""
+        from src.search.bm25 import simple_tokenize, STOPWORDS
+
+        tokens = simple_tokenize("The quick brown fox and the lazy dog")
+        for t in tokens:
+            assert t not in STOPWORDS, f"Stopword '{t}' was not filtered"
+
+    def test_keeps_meaningful_terms(self):
+        """Actual content words must survive tokenization."""
+        from src.search.bm25 import simple_tokenize
+
+        tokens = simple_tokenize("Odysseus sailed across the wine-dark sea to Ithaca")
+        assert "odysseus" in tokens
+        assert "sailed" in tokens
+        assert "ithaca" in tokens
+
+    def test_excludes_underscores_and_symbols(self):
+        """Underscores and non-alpha symbols should not produce tokens."""
+        from src.search.bm25 import simple_tokenize
+
+        tokens = simple_tokenize("chunk_id = abc_123 value ^ 2")
+        assert "_" not in tokens
+        assert "^" not in tokens
+        assert "123" not in tokens
 
 
 class TestChunkIdStructure:

@@ -1,150 +1,75 @@
-# Book Workflows
+# Doc-Mate Workflows
 
-Simple Python scripts for book ingestion and querying.
+Core logic for document ingestion, querying, and agent orchestration.
 
-## Available Scripts
+## Key Modules
 
-### 1. book_ingest.py
-Ingest a book into the system.
+### 1. `document_ingest.py` (Ingestion Pipeline)
+Handles the end-to-end process of adding a document to the system.
 
-**Pipeline**: validate -> parse -> summarize -> store -> build_indexes -> verify
+**Stages**:
+1. **Validation**: Checks file existence, format, and slug uniqueness.
+2. **Parsing**: Uses type-specific parsers (Book, PDF, Conversation, Script) to chunk text.
+3. **Summarization**: Generates hierarchical summaries (Chapter -> Document) using LLM.
+4. **Storage**: Persists metadata, summaries, and chunks to PostgreSQL.
+5. **Graph Extraction**: Extracts entities and relationships into the Knowledge Graph (Postgres).
+6. **Indexing**: Builds BM25 (Keyword) and Vector (Semantic) search indexes.
 
-Builds both BM25 (keyword) and Vector (semantic) search indexes in Qdrant.
-
-**Usage**:
-```python
-import asyncio
-from src.flows.book_ingest import ingest_book
-
-result = asyncio.run(ingest_book(
-    slug="ody",
-    file_path="DATA/the_odyssey.txt",
-    title="The Odyssey",
-    author="Homer",
-    split_pattern=r"^(?:BOOK [IVXLCDM]+)\s*\n",
-    force_update=False
-))
-```
-
-**Parameters**:
-- `slug`: Short identifier (e.g., "ody", "aiw")
-- `file_path`: Path to book file
-- `title`: Book title
-- `author`: Book author (optional)
-- `split_pattern`: Regex to split chapters (optional)
-- `max_tokens`: Max tokens per chunk (default: 500)
-- `overlap`: Token overlap (default: 100)
-- `force_update`: Delete and re-ingest if exists (default: False)
-
-**Run directly**:
-```bash
-uv run python -m src.flows.book_ingest
-```
-
-### 2. book_query.py
-Query book content with hybrid search and summaries.
-
-Uses FusionRetriever for weighted hybrid search (BM25 + Vector embeddings).
+**Graph Integration**:
+- Extracts entities ("Achilles", "Patroclus") and relationships ("companion_of") automatically.
+- Resolves duplicates (e.g. merging "Achilles" and "Pelides").
+- Stores graph data in `graph_entities` and `graph_relationships` tables.
+- **Ephemeral Mode**: Skips Phoenix tracing but still persists graph for session privacy.
 
 **Usage**:
 ```python
-from src.flows.book_query import query_book
+from src.flows.document_ingest import ingest_document
 
-# Get all summaries
-result = query_book(
-    book_identifier="mma",
-    include_chapters=True,
-    include_book_summary=True
+await ingest_document(
+    slug="ili",
+    file_path="DATA/the_iliad.txt",
+    title="The Iliad",
+    doc_type="book",
+    ephemeral=False  # Set True for privacy mode
 )
-
-# Search with hybrid retrieval + summaries
-result = query_book(
-    book_identifier="ody",
-    query="odysseus journey home",
-    include_chapters=False,
-    include_book_summary=True
-)
-print(f"Found {result['search']['num_results']} chunks")
-print(f"Chunk IDs: {result['search']['chunk_ids']}")
 ```
 
-**Parameters**:
-- `book_identifier`: Book slug (str) or book_id (int)
-- `query`: Search query (optional)
-- `include_chapters`: Include chapter summaries (default: True)
-- `include_book_summary`: Include book summary (default: True)
-- `search_limit`: Max search results (default: 5)
+### 2. `agent_graph.py` (LangGraph Agent)
+Defines the reactive agent state machine that powers the Chat UI.
 
-**Run directly**:
+**Nodes**:
+- `agent`: The reasoning engine (LLM) that decides what to do.
+- `tools`: The execution layer that runs selected tools.
+
+**Logic**:
+- **System Prompt**: Enforces tool usage and document inference rules.
+- **Model Router**: Switches between OpenAI and Local (Ollama) models based on user selection.
+- **Tool Loop**: Agent -> Tools -> Agent (Reasoning) -> Final Answer.
+
+### 3. `agent_tools.py` (Tool Definitions)
+Wraps core logic into LangChain-compatible tools.
+
+- `search_document`: Hybrid search (BM25 + Vector + Graph).
+- `explore_entity_graph`: specialized tool for relationship queries ("How is X related to Y?").
+- `get_summary`: Retrieves high-level document summaries.
+- `search_multiple_documents`: Cross-document comparison.
+
+### 4. `document_query.py` (Retrieval Logic)
+Low-level query interface used by the tools.
+
+- **Triple Hybrid Fusion**: Combines scores from:
+  1. **BM25** (35%): Exact keyword matches.
+  2. **Vector** (35%): Semantic similarity.
+  3. **Graph** (30%): Entity relationship proximity.
+
+## Running Tests
+
+Integration tests for these flows are available in `tests/integration/`.
+
 ```bash
-uv run python -m src.flows.book_query
+# Test ingestion
+uv run tests/integration/test_mini_ingest.py
+
+# Test agent reasoning
+uv run tests/integration/test_agent_graph.py
 ```
-
-## Database
-
-Services required:
-- PostgreSQL (books metadata and summaries)
-- Qdrant (vector search - optional)
-
-Start services:
-```bash
-make start
-```
-
-Stop services:
-```bash
-make down
-```
-
-## Examples
-
-### Ingest a new book
-```bash
-python << 'EOF'
-import asyncio
-from src.flows.book_ingest import ingest_book
-
-result = asyncio.run(ingest_book(
-    slug="sha",
-    file_path="DATA/sherlock_holmes.txt",
-    title="Sherlock Holmes",
-    author="Arthur Conan Doyle",
-    force_update=False
-))
-print(result)
-EOF
-```
-
-### Query book summaries
-```bash
-python << 'EOF'
-from src.flows.book_query import query_book
-
-result = query_book("mma", include_chapters=True)
-print(f"Found {result['chapters']['num_chapters']} chapters")
-print(f"Book summary: {result['book_summary']['summary'][:200]}...")
-EOF
-```
-
-## Search Details
-
-### Hybrid Search
-The ingestion pipeline builds two indexes:
-1. **BM25**: Keyword-based search using term frequency
-2. **Vector**: Semantic search using sentence-transformers (BAAI/bge-small-en)
-
-Query uses weighted fusion (alpha=0.7):
-- 70% weight on semantic similarity
-- 30% weight on keyword matching
-
-### Customization
-Adjust search parameters in `src/search/hybrid.py`:
-- `alpha`: Weight between BM25 and vector (0.0 = all BM25, 1.0 = all vector)
-- `transformer`: Change embedding model
-- `k`, `c`: RRF fusion parameters
-
-## TODO
-
-- Add book management scripts (list, update, delete)
-- Add batch ingestion script
-- Add filtering by book_id in search results

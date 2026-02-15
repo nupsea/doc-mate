@@ -38,17 +38,24 @@ CREATE TABLE IF NOT EXISTS document_summaries (
 CREATE TABLE IF NOT EXISTS bm25_index (
     term TEXT NOT NULL,
     chunk_id TEXT NOT NULL,
+    doc_id INT NOT NULL,
     frequency INT NOT NULL,
-    PRIMARY KEY (term, chunk_id)
+    PRIMARY KEY (term, chunk_id),
+    FOREIGN KEY (doc_id) REFERENCES documents(doc_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_bm25_term ON bm25_index(term);
 CREATE INDEX IF NOT EXISTS idx_bm25_chunk_id ON bm25_index(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_bm25_index_doc_id ON bm25_index(doc_id);
 
 CREATE TABLE IF NOT EXISTS bm25_doc_lens (
     chunk_id TEXT PRIMARY KEY,
-    doc_len INT NOT NULL
+    doc_id INT NOT NULL,
+    doc_len INT NOT NULL,
+    FOREIGN KEY (doc_id) REFERENCES documents(doc_id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_bm25_doc_lens_doc_id ON bm25_doc_lens(doc_id);
 
 -- Metrics tables for monitoring
 CREATE TABLE IF NOT EXISTS query_metrics (
@@ -77,3 +84,19 @@ CREATE TABLE IF NOT EXISTS query_metrics (
 CREATE INDEX IF NOT EXISTS idx_query_metrics_timestamp ON query_metrics(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_query_metrics_doc_slug ON query_metrics(doc_slug);
 CREATE INDEX IF NOT EXISTS idx_query_metrics_success ON query_metrics(success);
+
+-- Ingestion job status tracking (survives browser disconnects)
+CREATE TABLE IF NOT EXISTS ingest_jobs (
+    job_id VARCHAR(100) PRIMARY KEY,
+    slug VARCHAR(50) NOT NULL,
+    title TEXT,
+    doc_type VARCHAR(20),
+    status VARCHAR(20) NOT NULL DEFAULT 'running',
+    error_message TEXT,
+    result_summary TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    completed_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_ingest_jobs_status ON ingest_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_ingest_jobs_created_at ON ingest_jobs(created_at DESC);

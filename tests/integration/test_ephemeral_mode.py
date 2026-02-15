@@ -1,20 +1,20 @@
 """
 Test ephemeral and internal modes
 """
-import asyncio
+import pytest
 import os
+import io
+from contextlib import redirect_stdout, redirect_stderr
 from src.mcp_client.agent import BookMateAgent
 
 
-async def test_ephemeral_mode():
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"])
+async def test_ephemeral_mode(anyio_backend):
     """Test that ephemeral mode doesn't save metrics or traces"""
     print("="*80)
     print("TEST: Ephemeral Mode")
     print("="*80)
-
-    # Capture stdout to check for metrics messages
-    import io
-    from contextlib import redirect_stdout, redirect_stderr
 
     f_out = io.StringIO()
     f_err = io.StringIO()
@@ -38,15 +38,14 @@ async def test_ephemeral_mode():
     print(f"Metrics messages found: {has_metrics_msg}")
     print(f"Phoenix messages found: {has_phoenix_msg}")
 
-    if has_metrics_msg or has_phoenix_msg:
-        print("✗ FAILED: Ephemeral mode leaked metrics/tracing")
-        return False
-    else:
-        print("✓ PASSED: Ephemeral mode working correctly")
-        return True
+    assert not has_metrics_msg, "Ephemeral mode leaked metrics"
+    assert not has_phoenix_msg, "Ephemeral mode leaked tracing"
+    print("✓ PASSED: Ephemeral mode working correctly")
 
 
-async def test_internal_mode():
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"])
+async def test_internal_mode(anyio_backend):
     """Test that internal mode forces local LLM"""
     print("\n" + "="*80)
     print("TEST: Internal Mode")
@@ -54,8 +53,7 @@ async def test_internal_mode():
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        print("⚠️  Skipping (no API key to test with)")
-        return True
+        pytest.skip("no API key to test with")
 
     # Even with API key, internal mode should use local
     agent = BookMateAgent(openai_api_key=api_key, internal_mode=True)
@@ -66,15 +64,13 @@ async def test_internal_mode():
     await agent.connect_to_mcp_server()
     await agent.close()
 
-    if is_local:
-        print("✓ PASSED: Internal mode forced local LLM")
-        return True
-    else:
-        print(f"✗ FAILED: Internal mode using {agent.llm_provider.provider_name}")
-        return False
+    assert is_local, f"Internal mode using {agent.llm_provider.provider_name}"
+    print("✓ PASSED: Internal mode forced local LLM")
 
 
-async def test_ephemeral_internal_mode():
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"])
+async def test_ephemeral_internal_mode(anyio_backend):
     """Test combined ephemeral + internal mode"""
     print("\n" + "="*80)
     print("TEST: Ephemeral + Internal Mode")
@@ -82,11 +78,7 @@ async def test_ephemeral_internal_mode():
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        print("⚠️  Skipping (no API key)")
-        return True
-
-    import io
-    from contextlib import redirect_stdout, redirect_stderr
+        pytest.skip("no API key")
 
     f_out = io.StringIO()
     f_err = io.StringIO()
@@ -103,31 +95,7 @@ async def test_ephemeral_internal_mode():
     has_metrics = "[METRICS]" in output
     has_phoenix = "Phoenix" in output
 
-    if is_local and not has_metrics and not has_phoenix:
-        print("✓ PASSED: Private mode (ephemeral+internal) working")
-        return True
-    else:
-        print(f"✗ FAILED: Local:{is_local}, Metrics:{has_metrics}, Phoenix:{has_phoenix}")
-        return False
-
-
-async def main():
-    results = []
-
-    results.append(await test_ephemeral_mode())
-    results.append(await test_internal_mode())
-    results.append(await test_ephemeral_internal_mode())
-
-    print("\n" + "="*80)
-    print("PRIVACY MODES TEST SUMMARY")
-    print("="*80)
-    print(f"Passed: {sum(results)}/{len(results)}")
-    print("="*80)
-
-    return all(results)
-
-
-if __name__ == "__main__":
-    import sys
-    result = asyncio.run(main())
-    sys.exit(0 if result else 1)
+    assert is_local, "Not using local LLM in private mode"
+    assert not has_metrics, "Metrics leaked in private mode"
+    assert not has_phoenix, "Phoenix leaked in private mode"
+    print("✓ PASSED: Private mode (ephemeral+internal) working")

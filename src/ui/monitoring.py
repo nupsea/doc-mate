@@ -3,9 +3,11 @@ Gradio UI adapter for monitoring dashboard.
 Uses the UI-agnostic MonitoringDashboard class.
 """
 
+import os
 import gradio as gr
 import pandas as pd
 from src.monitoring.dashboard import MonitoringDashboard
+from src.monitoring.tracer import is_phoenix_enabled
 
 
 def get_summary_stats_table() -> pd.DataFrame:
@@ -152,8 +154,16 @@ def create_monitoring_interface():
     with gr.Column():
         gr.Markdown("# Monitoring Dashboard")
 
+        phoenix_url = os.getenv("PHOENIX_UI_URL", "http://localhost:6006")
+        
+        # Check if tracing is actually active
+        if is_phoenix_enabled():
+            tracing_status = f"Tracing Active: **[View Phoenix UI]({phoenix_url})**"
+        else:
+            tracing_status = f"Tracing Inactive: **[Phoenix UI]({phoenix_url})** (Check if Phoenix is running)"
+
         gr.Markdown(
-            "**[LLM Tracing](http://localhost:6006)** - View detailed OpenAI traces, prompts, and token usage"
+            f"{tracing_status} - View detailed OpenAI traces, prompts, and token usage"
         )
 
         with gr.Row():
