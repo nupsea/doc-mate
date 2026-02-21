@@ -63,12 +63,12 @@ def test_diversity_filtering_temporal_spreading():
     # Should return fewer results (spread across time)
     assert len(diversified) <= 5
 
-    # Check temporal spacing (min 5 minutes between results)
+    # Check temporal spacing (min 60s when under quota, 300s once above half)
     if len(diversified) >= 2:
         timestamps = [_parse_timestamp(c["metadata"]["timestamp"]) for c in diversified]
         for i in range(len(timestamps) - 1):
             gap_seconds = abs((timestamps[i+1] - timestamps[i]).total_seconds())
-            assert gap_seconds >= 300, f"Gap too small: {gap_seconds}s between results {i} and {i+1}"
+            assert gap_seconds >= 60, f"Gap too small: {gap_seconds}s between results {i} and {i+1}"
 
 
 def test_diversity_filtering_speaker_balancing():

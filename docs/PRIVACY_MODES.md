@@ -1,6 +1,6 @@
 # Privacy Modes
 
-BookMate offers flexible privacy controls to match your data sensitivity and infrastructure requirements.
+Doc-Mate offers flexible privacy controls to match your data sensitivity and infrastructure requirements.
 
 ## Available Modes
 
@@ -86,19 +86,19 @@ Select privacy mode from radio buttons in chat interface:
 
 ### Programmatic (Python)
 ```python
-from src.mcp_client.agent import BookMateAgent
+from src.mcp_client.agent import DocMateAgent
 
 # Normal mode (default)
-agent = BookMateAgent(provider="openai")
+agent = DocMateAgent(provider="openai")
 
 # Ephemeral mode (OpenAI but no tracking)
-agent = BookMateAgent(provider="openai", ephemeral=True)
+agent = DocMateAgent(provider="openai", ephemeral=True)
 
 # Internal mode (local LLM, with metrics)
-agent = BookMateAgent(internal_mode=True)
+agent = DocMateAgent(internal_mode=True)
 
 # Private mode (maximum privacy)
-agent = BookMateAgent(ephemeral=True, internal_mode=True)
+agent = DocMateAgent(ephemeral=True, internal_mode=True)
 ```
 
 ## Technical Details
@@ -139,10 +139,11 @@ When switching privacy modes, conversation history is cleared ONLY when switchin
 - GPT-4o
 - GPT-4 Turbo
 - GPT-3.5 Turbo
-- Llama 3.1 8B (local)
+- Granite 3.2 8B, Llama 3.x (local)
 
 **Internal & Private:**
-- Llama 3.1 8B (local) only
+- Granite 3.2 8B (local) -- default
+- Llama 3.x (local)
 - Provider dropdown disabled
 
 ## FAQ

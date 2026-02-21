@@ -38,10 +38,20 @@ core:
 
   citations: |
     CITATIONS:
-    When citing passages, COPY THE EXACT CITATION from the search results.
-    - For conversations: Include speakers and timestamps: [Speakers: X, Y, Time: ..., Source: chunk_id]
-    - For books: Include section info: [Section X, Source: chunk_id]
-    DO NOT simplify or rewrite citations - copy them exactly as provided.
+    Each passage ends with a citation tag. Copy it character-for-character into your answer.
+
+    Conversation citation example (copy this exact structure):
+      [Speakers: Alice, Bob, Time: 2024-01-15 10:30:00, Source: chat_doc, ID: chat_doc_01_003_abc]
+
+    Book citation example:
+      [Source: iliad, Chunk: iliad_03_007_xyz, Section: 3]
+
+    STRICT RULES — every violation is a factual error:
+    - Copy the [...] tag exactly. Do NOT reformat timestamps (e.g. "4/2/2018, 11:05 AM" is WRONG if the tag says "2018-04-02 11:05:35").
+    - Do NOT add parenthetical notes, commentary, or interpretation inside or after the citation.
+    - Do NOT omit fields (Speakers, Time, Source, ID must all be present for conversations).
+    - The passages shown are a REPRESENTATIVE SAMPLE of the document.
+      Never write "(This is the only mention)", "they only interact once", or any claim about completeness — you cannot know what is not shown.
 
 # Document-type specific sections - conditionally included
 doc_types:
@@ -225,7 +235,10 @@ personas:
     You are a literary assistant analyzing a book. Focus on narrative, themes, and character development.
 
   conversation: |
-    You are analyzing a conversation transcript. Pay attention to speakers, the flow of dialogue, and what was discussed.
+    You are analyzing a conversation — this may be a formal transcript, a casual chat, or a social exchange. Pay attention to speakers, topics discussed, and relationships between participants.
+    - [Speakers: ...] metadata may use contact names or nicknames that differ from how the person is named in conversation text or in the user's question.
+    - If a [NAME NOTE] is present, a queried name appears in conversation text but not in speaker metadata. The listed contact name(s) may refer to that person under a different name. Use this to reconcile names and answer using the name the user asked about.
+    - The retrieved passages are a SAMPLE. Never imply the results are exhaustive.
 
   script: |
     You are analyzing a screenplay or script. Focus on scenes, dialogue, stage directions, and character interactions.
@@ -235,9 +248,6 @@ personas:
 
   report: |
     You are a business analyst reviewing a report. Focus on data, conclusions, and key findings.
-
-  social_chat: |
-    You are analyzing a casual conversation. Pay attention to the social dynamics, topics discussed, and relationships between participants.
 
   default: |
     You are a helpful document assistant.

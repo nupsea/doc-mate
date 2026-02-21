@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import random
 from typing import List, Dict, Any
 from langchain_openai import ChatOpenAI
@@ -8,6 +9,8 @@ from pydantic import BaseModel, Field
 
 from src.graph.schemas import Entity, Relationship, Episode, DOC_TYPE_SCHEMAS
 from src.llm.config import LLMConfig
+
+logger = logging.getLogger(__name__)
 
 # --- Pydantic Models for Structured Output ---
 
@@ -124,7 +127,7 @@ Text Content (with IDs):
         active_doc_type = doc_type
         if doc_type == "conversation" and self._is_social_chat(chunks):
             active_doc_type = "social_chat"
-            print(f"[Graph] Auto-detected social_chat for {active_doc_type}")
+            logger.info("Auto-detected social_chat for %s", active_doc_type)
             
         schema = DOC_TYPE_SCHEMAS.get(active_doc_type, DOC_TYPE_SCHEMAS["book"])
         batches = [chunks[i:i + self.batch_size] for i in range(0, len(chunks), self.batch_size)]
@@ -212,11 +215,11 @@ Text Content (with IDs):
                         base = retry_delay if is_rate_limit else 10
                         wait_time = base * (2 ** attempt)
                         label = "Rate limit" if is_rate_limit else "Transient error"
-                        print(f"[Graph Extraction] {label} (Attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait_time}s...")
+                        logger.warning("%s (Attempt %d/%d): %s. Retrying in %ds...", label, attempt+1, max_retries, e, wait_time)
                         await asyncio.sleep(wait_time)
                         continue
 
-                    print(f"[Graph Extraction Error] Batch failed: {e}")
+                    logger.error("Batch extraction failed: %s", e)
                     return [], []
         
         return [], []
@@ -271,7 +274,7 @@ Text Content (with IDs):
                     # Output too large -- split batch in half and retry smaller
                     if "length limit" in error_msg and len(batch) > 1:
                         mid = len(batch) // 2
-                        print(f"[Episode Extraction] Output truncated ({len(batch)} chunks). Splitting into {mid} + {len(batch) - mid} and retrying...")
+                        logger.warning("Episode output truncated (%d chunks). Splitting into %d + %d and retrying...", len(batch), mid, len(batch) - mid)
                         left, right = await asyncio.gather(
                             self._process_episode_batch(batch[:mid]),
                             self._process_episode_batch(batch[mid:])
@@ -290,11 +293,11 @@ Text Content (with IDs):
                         base = retry_delay if is_rate_limit else 10
                         wait_time = base * (2 ** attempt)
                         label = "Rate limit" if is_rate_limit else "Transient error"
-                        print(f"[Episode Extraction] {label} (Attempt {attempt+1}/{max_retries}): {e}. Retrying in {wait_time}s...")
+                        logger.warning("Episode %s (Attempt %d/%d): %s. Retrying in %ds...", label, attempt+1, max_retries, e, wait_time)
                         await asyncio.sleep(wait_time)
                         continue
 
-                    print(f"[Episode Extraction Error]: {e}")
+                    logger.error("Episode extraction failed: %s", e)
                     return []
 
         return []

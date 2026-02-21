@@ -8,14 +8,21 @@ import gradio as gr
 from src.monitoring.metrics import metrics_collector
 
 
-# Store query_id for each chat turn (message index -> query_id)
+# Store query_id and source_refs for each chat turn (message index -> {query_id, source_refs})
 query_id_map = {}
+source_refs_map = {}
 
 
 async def respond(message, chat_history, selected_doc, selected_provider, selected_model, privacy_mode, ui):
-    """Handle chat interactions."""
+    """Handle chat interactions.
+
+    Yields:
+        (chat_history, message_text, feedback_row_update,
+         save_note_accordion_update, note_title, note_content, note_sources_md)
+    """
     if not message.strip():
-        yield chat_history, message, gr.update(visible=False)
+        yield (chat_history, message, gr.update(visible=False),
+               gr.update(visible=False), gr.update(), gr.update(), gr.update())
         return
 
     # Update provider/model if changed (with proper cleanup)
@@ -25,8 +32,9 @@ async def respond(message, chat_history, selected_doc, selected_provider, select
     if settings_changed and was_ephemeral and not is_ephemeral:
         print("[UI] Switching from ephemeral to non-ephemeral mode - clearing conversation history to preserve privacy")
         chat_history = []
-        # Clear query_id map as well
+        # Clear query_id and source_refs maps as well
         query_id_map.clear()
+        source_refs_map.clear()
     elif settings_changed:
         print("[UI] Settings changed but preserving conversation history for continuity")
 
@@ -34,20 +42,91 @@ async def respond(message, chat_history, selected_doc, selected_provider, select
     chat_history.append([message, "Thinking..."])
 
     # Keep message in textbox during processing
-    yield chat_history, message, gr.update(visible=False)
+    yield (chat_history, message, gr.update(visible=False),
+           gr.update(visible=False), gr.update(), gr.update(), gr.update())
 
     # Get bot response
-    bot_response, query_id = await ui.chat(message, chat_history[:-1], selected_doc)
+    bot_response, query_id, source_refs = await ui.chat(message, chat_history[:-1], selected_doc)
 
     # Update with actual response
     chat_history[-1][1] = bot_response
 
-    # Store query_id for this interaction
+    # Store query_id and source_refs for this interaction
+    msg_idx = len(chat_history) - 1
     if query_id:
-        query_id_map[len(chat_history) - 1] = query_id
+        query_id_map[msg_idx] = query_id
+    if source_refs:
+        source_refs_map[msg_idx] = source_refs
 
-    # Clear textbox and show feedback buttons
-    yield chat_history, "", gr.update(visible=True, value=None)
+    # Pre-fill save-as-note fields
+    default_title = message[:60].strip()
+    sources_md = _format_source_refs_md(source_refs)
+
+    # Clear textbox, show feedback + save-note accordion
+    yield (chat_history, "", gr.update(visible=True, value=None),
+           gr.update(visible=True, open=False),
+           gr.update(value=default_title),
+           gr.update(value=bot_response),
+           gr.update(value=sources_md))
+
+
+def _format_source_refs_md(source_refs: list) -> str:
+    """Format source references as markdown for display."""
+    if not source_refs:
+        return "*No source references*"
+    lines = ["**Source passages:**"]
+    for ref in source_refs[:10]:  # Cap at 10 for display
+        slug = ref.get("slug", "?")
+        chunk_id = ref.get("chunk_id", "?")
+        snippet = ref.get("snippet", "")[:80]
+        meta_parts = []
+        if ref.get("timestamp"):
+            meta_parts.append(ref["timestamp"])
+        if ref.get("speakers"):
+            meta_parts.append(", ".join(ref["speakers"]))
+        meta_str = f" ({' | '.join(meta_parts)})" if meta_parts else ""
+        lines.append(f"- `{slug}`{meta_str} / `{chunk_id}`: {snippet}...")
+    if len(source_refs) > 10:
+        lines.append(f"- *...and {len(source_refs) - 10} more*")
+    return "\n".join(lines)
+
+
+async def save_as_note(title, content, tags_str, chat_history):
+    """Save the current response as a note."""
+    if not title or not content:
+        return gr.update(visible=True, value="Title and content are required.")
+
+    from src.content.note_store import NoteStore
+    from src.flows.note_ingest import index_note
+
+    # Parse tags
+    tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else []
+
+    # Get source refs from the last response
+    last_idx = len(chat_history) - 1 if chat_history else -1
+    refs = source_refs_map.get(last_idx, [])
+
+    # Also capture the query that generated this response
+    query = chat_history[last_idx][0] if last_idx >= 0 and chat_history else ""
+    enriched_refs = []
+    for ref in refs:
+        enriched_ref = dict(ref)
+        enriched_ref["query"] = query
+        enriched_refs.append(enriched_ref)
+
+    try:
+        store = NoteStore()
+        result = store.create_note(title, content, tags=tags, source_refs=enriched_refs)
+        slug = result["slug"]
+
+        # Index in background (non-blocking)
+        import asyncio
+        asyncio.create_task(index_note(slug, content))
+
+        return gr.update(visible=True, value=f"Note saved: '{title}' ({slug})")
+    except Exception as e:
+        print(f"[SAVE NOTE] Error: {e}")
+        return gr.update(visible=True, value=f"Error saving note: {e}")
 
 
 def submit_feedback(rating, chat_history):
@@ -95,7 +174,7 @@ def update_model_choices(provider, privacy_mode):
 
 def create_chat_interface(ui):
     """Create the chat tab interface."""
-    from src.ui.utils import get_available_documents, format_document_list
+    from src.ui.utils import get_available_documents, format_document_list, format_doc_dropdown_choices
 
     with gr.Column():
         with gr.Row():
@@ -104,11 +183,7 @@ def create_chat_interface(ui):
 
                 with gr.Row():
                     doc_dropdown = gr.Dropdown(
-                        choices=[("Select a doc...", "none")]
-                        + [
-                            (f"{title}", slug)
-                            for slug, title, _, _, _ in get_available_documents()
-                        ],
+                        choices=format_doc_dropdown_choices(get_available_documents()),
                         value="none",
                         label="Select Document (optional)",
                         info="Auto-injects document title into queries",
@@ -200,6 +275,27 @@ def create_chat_interface(ui):
 
                 feedback_status = gr.Textbox(visible=False, show_label=False)
 
+                # Save as Note section
+                with gr.Accordion("Save as Note", open=False, visible=False) as save_note_accordion:
+                    note_title = gr.Textbox(label="Title", placeholder="Note title...")
+                    note_tags = gr.Textbox(
+                        label="Tags (comma-separated)",
+                        placeholder="e.g. odyssey, themes, characters",
+                    )
+                    note_content = gr.Textbox(
+                        label="Content (editable)",
+                        lines=8,
+                        placeholder="Response content will appear here for editing...",
+                    )
+                    note_sources_display = gr.Markdown(
+                        value="*No source references*", label="Sources"
+                    )
+                    with gr.Row():
+                        save_note_btn = gr.Button("Save Note", variant="primary", size="sm")
+                        note_save_status = gr.Textbox(
+                            visible=False, show_label=False, interactive=False
+                        )
+
                 with gr.Accordion("Tips", open=False):
                     gr.Markdown(
                         """
@@ -230,11 +326,16 @@ def create_chat_interface(ui):
                 )
 
         # Event handlers - wrap to pass ui
+        submit_outputs = [
+            chatbot, msg, feedback_row,
+            save_note_accordion, note_title, note_content, note_sources_display,
+        ]
+
         async def handle_submit(msg_text, history, doc_sel, provider_sel, model_sel, privacy):
-            async for result_history, result_msg, feedback_update in respond(
+            async for result in respond(
                 msg_text, history, doc_sel, provider_sel, model_sel, privacy, ui
             ):
-                yield result_history, result_msg, feedback_update
+                yield result
 
         def handle_rating(rating, history):
             status = submit_feedback(rating, history)
@@ -255,19 +356,28 @@ def create_chat_interface(ui):
         msg.submit(
             handle_submit,
             [msg, chatbot, doc_dropdown, provider_dropdown, model_dropdown, privacy_mode],
-            [chatbot, msg, feedback_row]
+            submit_outputs,
         )
         send_btn.click(
             handle_submit,
             [msg, chatbot, doc_dropdown, provider_dropdown, model_dropdown, privacy_mode],
-            [chatbot, msg, feedback_row]
+            submit_outputs,
         )
         clear_btn.click(
-            lambda: ([], gr.update(visible=False)), None, [chatbot, feedback_row]
+            lambda: ([], gr.update(visible=False), gr.update(visible=False)),
+            None,
+            [chatbot, feedback_row, save_note_accordion],
         )
 
         submit_rating_btn.click(
             handle_rating, [rating_radio, chatbot], [feedback_status, feedback_row]
+        )
+
+        # Save as Note handler
+        save_note_btn.click(
+            save_as_note,
+            [note_title, note_content, note_tags, chatbot],
+            [note_save_status],
         )
 
         # Load document list on page load

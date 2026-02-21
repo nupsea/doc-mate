@@ -8,6 +8,7 @@ import threading
 from src.mcp_client.agent import BookMateAgent
 from src.ui.chat import create_chat_interface
 from src.ui.ingest import create_ingest_interface, _format_job_banner
+from src.ui.notes import create_notes_interface
 from src.ui.monitoring import create_monitoring_interface
 from src.flows.document_query import preload_retriever
 from src.content.db import DatabaseManager
@@ -24,6 +25,7 @@ class DocMateUI:
         self.provider = "openai"  # Default provider
         self.model = "gpt-4o-mini"  # Default model
         self.privacy_mode = "normal"  # Default: normal mode
+        self._fallback_shown = False  # Show fallback notice only once
 
     async def set_provider_and_model(self, provider: str, model: str, privacy_mode: str):
         """Set the LLM provider, model, and privacy mode.
@@ -45,12 +47,13 @@ class DocMateUI:
             self.provider = provider
             self.model = model
             self.privacy_mode = privacy_mode
+            self._fallback_shown = False
 
         return changed, old_ephemeral, new_ephemeral
 
     async def chat(
         self, message: str, history: list, selected_doc: str = None
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, list]:
         """
         Handle chat messages with the agent.
 
@@ -60,7 +63,7 @@ class DocMateUI:
             selected_doc: Selected document slug (optional)
 
         Returns:
-            (agent_response, query_id)
+            (agent_response, query_id, source_refs)
         """
         # Parse privacy mode into flags
         ephemeral = self.privacy_mode in ["ephemeral", "private"]
@@ -123,12 +126,17 @@ class DocMateUI:
                     conversation_history.append({"role": "assistant", "content": bot_msg})
 
             doc_slug = selected_doc if selected_doc and selected_doc != "none" else None
-            response, _, query_id = await agent.chat(message, conversation_history, selected_doc=doc_slug)
-            return response, query_id
+            response, _, query_id, source_refs = await agent.chat(message, conversation_history, selected_doc=doc_slug)
+
+            if agent.fallback_notice and not self._fallback_shown:
+                response = f"> **Note:** {agent.fallback_notice}\n\n{response}"
+                self._fallback_shown = True
+
+            return response, query_id, source_refs
 
         except Exception as e:
             print(f"Chat error: {e}")
-            return f"Error: {str(e)}. Please try again.", None
+            return f"Error: {str(e)}. Please try again.", None, []
         
         finally:
             # Always close the agent to clean up subprocesses
@@ -145,7 +153,7 @@ def create_app():
     # Initialize DB Pool
     DatabaseManager.get_pool()
     
-    from src.ui.utils import get_available_documents, format_document_list
+    from src.ui.utils import get_available_documents, format_document_list, format_doc_dropdown_choices
 
     # Preload retriever in background to avoid delay on first query
     threading.Thread(target=preload_retriever, daemon=True).start()
@@ -156,16 +164,20 @@ def create_app():
         gr.Markdown("# Doc Mate - AI Document Assistant")
 
         with gr.Tabs() as tabs:
-            # Tab 1: Chat Interface
+            # Tab 0: Chat Interface
             with gr.Tab("Chat", id=0):
                 dropdown, doc_list, load_doc_list = create_chat_interface(ui)
 
+            # Tab 1: Notes
+            with gr.Tab("Notes", id=1):
+                notes_table, notes_tag_filter, load_notes = create_notes_interface()
+
             # Tab 2: Add New Document
-            with gr.Tab("Add Document", id=1):
+            with gr.Tab("Add Document", id=2):
                 ingest_doc_list, ingest_job_banner = create_ingest_interface()
 
             # Tab 3: Monitoring
-            with gr.Tab("Monitoring", id=2):
+            with gr.Tab("Monitoring", id=3):
                 create_monitoring_interface()
 
         # Auto-refresh document lists when switching tabs
@@ -173,10 +185,7 @@ def create_app():
             # Always fetch fresh data from database (source of truth)
             docs = get_available_documents()
             new_list = format_document_list(docs)
-            # Show only titles in dropdown, not slugs
-            new_choices = [("Select a doc...", "none")] + [
-                (f"{title}", slug) for slug, title, _, _, _ in docs
-            ]
+            new_choices = format_doc_dropdown_choices(docs)
 
             # Refresh ingest job banner
             from src.content.store import PgresStore
@@ -185,22 +194,35 @@ def create_app():
             except Exception:
                 banner = ""
 
+            # Refresh notes list
+            from src.ui.notes import _load_note_list, _get_all_tags
+            note_rows = _load_note_list()
+            note_tags = _get_all_tags()
+
             print(
                 f"[DEBUG] Tab switched to: {evt.value}, refreshing with {len(docs)} documents"
             )
 
-            if evt.value == 0 or evt.index == 0:
-                # Switching to Chat tab - refresh chat document list and dropdown
-                return new_list, gr.update(choices=new_choices), gr.update(), banner
-            elif evt.value == 1 or evt.index == 1:
-                # Switching to Add Document tab - refresh ingest document list
-                return gr.update(), gr.update(), new_list, banner
+            if evt.index == 0:
+                # Chat tab
+                return (new_list, gr.update(choices=new_choices),
+                        gr.update(), gr.update(), gr.update(), banner)
+            elif evt.index == 1:
+                # Notes tab
+                return (gr.update(), gr.update(),
+                        note_rows, gr.update(choices=note_tags), gr.update(), banner)
+            elif evt.index == 2:
+                # Add Document tab
+                return (gr.update(), gr.update(),
+                        gr.update(), gr.update(), new_list, banner)
 
-            # Refresh both to be safe
-            return new_list, gr.update(choices=new_choices), new_list, banner
+            # Default: refresh all
+            return (new_list, gr.update(choices=new_choices),
+                    note_rows, gr.update(choices=note_tags), new_list, banner)
 
         tabs.select(
-            refresh_on_tab_change, None, [doc_list, dropdown, ingest_doc_list, ingest_job_banner]
+            refresh_on_tab_change, None,
+            [doc_list, dropdown, notes_table, notes_tag_filter, ingest_doc_list, ingest_job_banner]
         )
 
         # Load document lists on startup
@@ -214,7 +236,12 @@ def create_app():
             except Exception:
                 return ""
 
+        def load_notes_initial():
+            rows, tag_update = load_notes()
+            return rows, tag_update
+
         app.load(load_doc_list, None, doc_list)
+        app.load(load_notes_initial, None, [notes_table, notes_tag_filter])
         app.load(load_ingest_list, None, ingest_doc_list)
         app.load(load_job_banner, None, ingest_job_banner)
 

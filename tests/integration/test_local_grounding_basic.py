@@ -85,7 +85,7 @@ async def run_tests():
         )
 
         try:
-            response, _, _ = await agent.chat(
+            response, _, _, _ = await agent.chat(
                 tc["query"],
                 conversation_history=[],
                 selected_doc=tc["doc"],

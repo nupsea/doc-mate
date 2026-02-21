@@ -19,17 +19,17 @@ class FusionRetriever:
         self.vec = SemanticRetriever(transformer=transformer)
         self.alpha = alpha
 
-    def build_index(self, chunks):
+    def build_index(self, chunks) -> None:
         self.bm25.build_index(chunks)
         # BM25Retriever.build_index now handles storage in DB
         self.vec.build_index(chunks)
 
-    def load_bm25_index(self):
+    def load_bm25_index(self) -> None:
         """Deprecated."""
         pass
 
     @staticmethod
-    def rrf_fusion(bm25_results, embed_results, k=7, c=60):
+    def rrf_fusion(bm25_results, embed_results, k=7, c=60) -> list[str]:
         """
         Fuse BM25 + Embedding rankings using Reciprocal Rank Fusion (RRF).
 
@@ -50,7 +50,7 @@ class FusionRetriever:
         fused = sorted(ranks.items(), key=lambda x: -x[1])[:k]
         return [cid for cid, _ in fused]
 
-    def weighted_fusion(self, bm25_results, embed_results, topk=7):
+    def weighted_fusion(self, bm25_results, embed_results, topk=7) -> list[str]:
         scores = defaultdict(float)
         for rank, c in enumerate(bm25_results, start=1):
             scores[c["id"]] += self.alpha * (1.0 / rank)
@@ -58,7 +58,7 @@ class FusionRetriever:
             scores[c["id"]] += (1 - self.alpha) * (1.0 / rank)
         return [cid for cid, _ in sorted(scores.items(), key=lambda x: -x[1])[:topk]]
 
-    def id_search(self, query: str, topk=7, use_bm25=True, doc_slug=None):
+    def id_search(self, query: str, topk=7, use_bm25=True, doc_slug=None) -> list[str]:
         """
         Hybrid search using database-backed BM25 and Vector search.
 

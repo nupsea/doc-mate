@@ -74,7 +74,7 @@ async def test_homer_comprehensive():
         print(f"Query: '{test['query']}'")
         
         try:
-            response, _, _ = await agent.chat(test['query'])
+            response, _, _, _ = await agent.chat(test['query'])
             print(f"Response (preview): {response[:200]}...")
             
             content_lower = response.lower()

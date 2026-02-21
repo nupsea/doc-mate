@@ -58,7 +58,7 @@ async def test_graph_knowledge_queries():
         
         try:
             # We use the agent's chat method which invokes the LangGraph RRG flow
-            response, _, _ = await agent.chat(test['query'])
+            response, _, _, _ = await agent.chat(test['query'])
             
             print(f"Response (preview): {response[:150]}...")
             

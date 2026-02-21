@@ -81,7 +81,7 @@ async def run_comprehensive_test():
     print("Query: 'What does The Odyssey say about wisdom?'")
     print("Expected: Should call search_book with slug 'ody'")
     try:
-        response, _, _ = await agent.chat("What does The Odyssey say about wisdom?")
+        response, _, _, _ = await agent.chat("What does The Odyssey say about wisdom?")
         if len(response) > 50 and "ody" in response.lower():
             print("✓ PASS: Single document search working")
             print(f"  Response length: {len(response)} chars")
@@ -106,7 +106,7 @@ async def run_comprehensive_test():
     print("Query: 'What is Meditations about?'")
     print("Expected: Should call get_book_summary for slug 'mam'")
     try:
-        response, _, _ = await agent.chat("What is Meditations about?")
+        response, _, _, _ = await agent.chat("What is Meditations about?")
         if len(response) > 100:
             print("✓ PASS: Document summary working")
             print(f"  Response length: {len(response)} chars")
@@ -131,7 +131,7 @@ async def run_comprehensive_test():
     print("Query: 'Give me a chapter breakdown of The Iliad'")
     print("Expected: Should call get_chapter_summaries for slug 'ili'")
     try:
-        response, _, _ = await agent.chat("Give me a chapter breakdown of The Iliad")
+        response, _, _, _ = await agent.chat("Give me a chapter breakdown of The Iliad")
         if len(response) > 200 and ("chapter" in response.lower() or "book" in response.lower()):
             print("✓ PASS: Chapter summaries working")
             print(f"  Response length: {len(response)} chars")
@@ -156,7 +156,7 @@ async def run_comprehensive_test():
     print("Query: 'Compare The Iliad and The Odyssey on heroism'")
     print("Expected: Should call search_multiple_books with ['ili', 'ody'] in ONE call")
     try:
-        response, _, _ = await agent.chat("Compare The Iliad and The Odyssey on heroism")
+        response, _, _, _ = await agent.chat("Compare The Iliad and The Odyssey on heroism")
         # Check if response mentions both books
         has_iliad = "iliad" in response.lower()
         has_odyssey = "odyssey" in response.lower()
@@ -188,7 +188,7 @@ async def run_comprehensive_test():
     print("Expected: Should call search_multiple_books(['mam', 'ili', 'ody']) in ONE call")
     print("THIS IS THE CRITICAL TEST - Must search ALL 3 books together")
     try:
-        response, _, _ = await agent.chat("Compare Marcus Aurelius and Homer on bravery")
+        response, _, _, _ = await agent.chat("Compare Marcus Aurelius and Homer on bravery")
         # Check if response mentions all three works
         has_meditations = "meditation" in response.lower() or "marcus" in response.lower()
         has_iliad = "iliad" in response.lower()
@@ -224,7 +224,7 @@ async def run_comprehensive_test():
     print("Query: 'What was discussed in the sample meeting about Q1?'")
     print("Expected: Should search conversation document")
     try:
-        response, _, _ = await agent.chat("What was discussed in the sample meeting about Q1?")
+        response, _, _, _ = await agent.chat("What was discussed in the sample meeting about Q1?")
         if len(response) > 50:
             print("✓ PASS: Conversation document search working")
             print(f"  Response length: {len(response)} chars")
@@ -249,7 +249,7 @@ async def run_comprehensive_test():
     print("Query: 'What does design data intensive apps say about replication?'")
     print("Expected: Should search technical documentation")
     try:
-        response, _, _ = await agent.chat("What does design data intensive apps say about replication?")
+        response, _, _, _ = await agent.chat("What does design data intensive apps say about replication?")
         if len(response) > 50:
             print("✓ PASS: Technical documentation search working")
             print(f"  Response length: {len(response)} chars")

@@ -92,7 +92,7 @@ class SummaryGenerator:
         self.enc = tiktoken.get_encoding("cl100k_base")
         self.max_tokens = 100000  # Safe limit well below 200k TPM
 
-    def split_text_into_batches(self, text: str, max_tokens: int = None):
+    def split_text_into_batches(self, text: str, max_tokens: int = None) -> list[str]:
         """Split text into batches that fit within token limit."""
         if max_tokens is None:
             max_tokens = self.max_tokens
@@ -367,11 +367,18 @@ Output ONLY the JSON array, no other text."""
                     )
                     content = str(resp.choices[0].message.content).strip()
 
-                    # Parse JSON from response
+                    # Parse JSON from response — handle markdown fences and prose preambles
                     import json
-                    # Handle markdown code blocks
-                    if content.startswith("```"):
-                        content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                    import re as _re
+                    # Strip markdown code fences (```json ... ``` or ``` ... ```)
+                    fence_match = _re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
+                    if fence_match:
+                        content = fence_match.group(1).strip()
+                    # If content still doesn't start with '[', extract array via regex
+                    if not content.lstrip().startswith("["):
+                        arr_match = _re.search(r'\[[\s\S]*\]', content)
+                        if arr_match:
+                            content = arr_match.group(0)
                     arcs = json.loads(content)
 
                     print(f"[SUMMARY] Generated {len(arcs)} arc summaries from {len(episodes)} episodes")

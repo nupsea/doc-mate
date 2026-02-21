@@ -113,6 +113,26 @@ class AdaptiveRetriever(FusionRetriever):
         # Long descriptive queries benefit from semantic
         return 0.6  # Slightly more semantic weight
 
+    def _query_semantic_ratio(self, query: str) -> float:
+        """Estimate how much a query benefits from semantic vs keyword matching.
+
+        Returns a value in [0, 1] where higher means more semantic.
+        Heuristics:
+        - Questions and longer queries lean semantic
+        - Short keyword queries lean BM25
+        - Quoted phrases lean BM25
+        """
+        words = query.split()
+        word_count = len(words)
+
+        if '"' in query or "'" in query:
+            return 0.2  # Quoted phrase -- user wants exact match
+        if "?" in query or word_count > 6:
+            return 0.7  # Natural language question
+        if word_count <= 2:
+            return 0.2  # Short keyword lookup
+        return 0.4  # Default moderate
+
     def search(self,
         query: str,
         topk: int = 7,
@@ -121,7 +141,8 @@ class AdaptiveRetriever(FusionRetriever):
         candidate_multiplier: int = 3,
         doc_slug: str = None,
         hint_entities: list[str] = None,
-    ):
+        doc_type: str = None,
+    ) -> list[str]:
         """
         Adaptive search with query preprocessing.
 
@@ -136,6 +157,7 @@ class AdaptiveRetriever(FusionRetriever):
             candidate_multiplier: Retrieve topk * multiplier candidates before fusion
             doc_slug: If provided, only search within this document (e.g., 'aiw', 'gtr')
             hint_entities: Optional hint entities from router to seed graph search
+            doc_type: Document type (conversation, book, etc.) for adaptive weighting
 
         Returns:
             List of chunk IDs
@@ -152,9 +174,10 @@ class AdaptiveRetriever(FusionRetriever):
         else:
             processed_query = query
 
-        # Load BM25 index if needed (Deprecated logic but kept for safety if someone calls save/load manually)
-        # In the new DB-backed world, self.bm25.N might be 0 until we fetch stats, but that's handled in search()
-        
+        # Conversations benefit from a larger candidate pool
+        if doc_type == "conversation":
+            candidate_multiplier = max(candidate_multiplier, 5)
+
         # Retrieve more candidates for better fusion
         candidate_count = topk * candidate_multiplier
 
@@ -175,20 +198,28 @@ class AdaptiveRetriever(FusionRetriever):
             except Exception as e:
                 logger.warning(f"Graph retrieval failed: {e}")
 
-        # Determine Fusion Weights
+        # Adaptive Fusion Weights
+        sem_ratio = self._query_semantic_ratio(query)
+
         if graph_results:
-            # Triple Hybrid Fusion
-            # BM25: 0.35 (Keywords)
-            # Vector: 0.35 (Semantics)
-            # Graph: 0.30 (Structure/Relation)
-            alpha_bm25 = 0.35
-            alpha_vec = 0.35
+            # Triple Hybrid -- shift BM25/Vector balance by query semantics
             alpha_graph = 0.30
-        else:
-            # Dual Hybrid (Classic)
-            alpha_bm25 = alpha
-            alpha_vec = 1.0 - alpha
+            remaining = 1.0 - alpha_graph
+            alpha_vec = remaining * (0.4 + 0.2 * sem_ratio)   # 0.28 - 0.42
+            alpha_bm25 = remaining - alpha_vec                  # 0.42 - 0.28
+        elif doc_type == "conversation":
+            # Conversations: boost semantic weight (paraphrasing is common)
+            alpha_vec = 0.35 + 0.15 * sem_ratio   # 0.35 - 0.50
+            alpha_bm25 = 1.0 - alpha_vec           # 0.65 - 0.50
             alpha_graph = 0.0
+        else:
+            # Dual Hybrid (Classic) with mild adaptive shift
+            alpha_vec = (1.0 - alpha) + 0.10 * sem_ratio  # base 0.30 + up to 0.07
+            alpha_bm25 = 1.0 - alpha_vec
+            alpha_graph = 0.0
+
+        logger.info("Fusion weights: bm25=%.2f, vec=%.2f, graph=%.2f (sem_ratio=%.2f, doc_type=%s)",
+                    alpha_bm25, alpha_vec, alpha_graph, sem_ratio, doc_type)
 
         # Apply weighted fusion (RRF-style reciprocal rank or simple score sum? Using Rank Fusion here)
         scores = {}
@@ -212,7 +243,7 @@ class AdaptiveRetriever(FusionRetriever):
         sorted_results = sorted(scores.items(), key=lambda x: -x[1])[:topk]
         return [cid for cid, _ in sorted_results]
 
-    def id_search(self, query: str, topk: int = 7, **kwargs):
+    def id_search(self, query: str, topk: int = 7, **kwargs) -> list[str]:
         """Alias for search() to maintain compatibility."""
         return self.search(query, topk, **kwargs)
 

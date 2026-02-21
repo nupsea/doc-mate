@@ -46,7 +46,7 @@ def _diversify_conversation_results(chunks, target_count=None):
         return chunks  # Too few to diversify
 
     if target_count is None:
-        target_count = max(5, len(chunks) // 2)  # Return ~half for diversity
+        target_count = max(5, int(len(chunks) * 0.7))  # Keep ~70% for diversity
 
     # Extract timestamps and speakers
     chunks_with_meta = []
@@ -73,25 +73,29 @@ def _diversify_conversation_results(chunks, target_count=None):
         x["original_rank"]
     ))
 
-    # Diversify selection
+    # Diversify selection with dynamic constraints
     selected = []
     speaker_counts = {}
     last_timestamp = None
-    MIN_TIME_GAP_SECONDS = 300  # 5 minutes between selected chunks
 
     for item in chunks_with_meta:
-        # Check speaker balance (max 2 per speaker if we have speakers)
+        # Relax constraints progressively when under quota
+        under_quota = len(selected) < target_count // 2
+
+        # Check speaker balance (relax limit when under quota)
         speaker = item["speaker"]
+        max_per_speaker = 3 if under_quota else 2
         if speaker:
-            if speaker_counts.get(speaker, 0) >= 2:
+            if speaker_counts.get(speaker, 0) >= max_per_speaker:
                 continue  # Skip - too many from this speaker
             speaker_counts[speaker] = speaker_counts.get(speaker, 0) + 1
 
-        # Check temporal spacing
+        # Check temporal spacing (relax gap when under quota)
+        min_gap = 60 if under_quota else 300
         timestamp = item["timestamp"]
         if timestamp and last_timestamp:
             gap = abs((timestamp - last_timestamp).total_seconds())
-            if gap < MIN_TIME_GAP_SECONDS:
+            if gap < min_gap:
                 continue  # Skip - too close in time to previous result
 
         # Select this chunk
@@ -155,13 +159,18 @@ def search_document_content(query: str, doc_identifier: str | int, limit: int = 
                 "error": f"Document not found: {doc_identifier}",
             }
 
+        # Resolve doc_type early so search can adapt weights
+        row = store.execute("SELECT doc_type FROM documents WHERE doc_id = %s", (doc_id,), fetch="one")
+        doc_type = row[0] if row else None
+
         retriever = get_retriever()
         # Pass doc_identifier as doc_slug to filter search results DURING search, not after
         chunk_ids = retriever.id_search(
-            query, topk=limit, doc_slug=doc_identifier, hint_entities=hint_entities
+            query, topk=limit, doc_slug=doc_identifier,
+            hint_entities=hint_entities, doc_type=doc_type,
         )
 
-        logger.debug(f"Hybrid search returned {len(chunk_ids)} chunk IDs for document '{doc_identifier}':")
+        logger.info(f"Hybrid search returned {len(chunk_ids)} chunk IDs for document '{doc_identifier}'")
         for i, cid in enumerate(chunk_ids[:10], 1):  # Show first 10
             logger.debug(f"  {i}. {cid}")
 
@@ -180,15 +189,12 @@ def search_document_content(query: str, doc_identifier: str | int, limit: int = 
                 }
             )
 
-        logger.debug(f"Retrieved {len(chunks_with_text)} chunks with text")
+        logger.info(f"Retrieved {len(chunks_with_text)} chunks with text for '{doc_identifier}'")
 
         # Apply diversity filtering for conversation documents
         # This prevents repetitive results from the same time window/speaker
-        row = store.execute("SELECT doc_type FROM documents WHERE doc_id = %s", (doc_id,), fetch="one")
-        doc_type = row[0] if row else None
-
         if doc_type == "conversation" and len(chunks_with_text) > 5:
-            logger.debug("Applying diversity filtering for conversation document")
+            logger.info("Applying diversity filtering for conversation document")
             chunks_with_text = _diversify_conversation_results(chunks_with_text)
 
         return {

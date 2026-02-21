@@ -7,6 +7,7 @@ Backward compatible with book ingestion.
 import asyncio
 import time
 from pathlib import Path
+from typing import Any
 
 from src.content.reader import GutenbergReader, PDFReader
 from src.content.parsers import get_parser
@@ -18,7 +19,7 @@ from src.graph.resolver import EntityResolver
 from src.graph.store import PostgresGraphStore
 
 
-def validate_inputs(slug: str, file_path: str, title: str, force_update: bool = False):
+def validate_inputs(slug: str, file_path: str, title: str, force_update: bool = False) -> dict[str, Any]:
     """Validate inputs before processing."""
     path = Path(file_path)
     if not path.exists():
@@ -51,7 +52,7 @@ def read_and_parse(
     split_pattern: str = None,
     max_tokens: int = 500,
     overlap: int = 100,
-):
+) -> dict[str, Any]:
     """
     Read file and parse into chunks using appropriate parser.
 
@@ -160,7 +161,7 @@ def store_document_metadata(
     metadata: dict = None,
     force_update: bool = False,
     is_ephemeral: bool = False,
-):
+) -> dict[str, Any]:
     """Store document metadata to database."""
     store = PgresStore()
 
@@ -206,7 +207,7 @@ def _cleanup_qdrant_vectors(slug: str):
     except Exception as e:
         print(f"[WARNING] Qdrant cleanup for '{slug}' failed: {e}")
 
-def store_summaries_to_db(slug: str, chapter_summaries: list, document_summary: str):
+def store_summaries_to_db(slug: str, chapter_summaries: list, document_summary: str) -> None:
     """Store document summaries to database."""
     store = PgresStore()
     if chapter_summaries and document_summary:
@@ -354,7 +355,7 @@ async def build_graph_index(
     }
 
 
-def verify_ingestion(slug: str, expected_chapters: int, allow_arc_summaries: bool = False):
+def verify_ingestion(slug: str, expected_chapters: int, allow_arc_summaries: bool = False) -> dict[str, Any]:
     """Verify document was ingested correctly.
 
     Args:

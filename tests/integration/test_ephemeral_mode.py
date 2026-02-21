@@ -27,7 +27,7 @@ async def test_ephemeral_mode(anyio_backend):
             agent = BookMateAgent(provider="local", ephemeral=True)
 
         await agent.connect_to_mcp_server()
-        response, _, _ = await agent.chat("What is 2+2?")
+        response, _, _, _ = await agent.chat("What is 2+2?")
         await agent.close()
 
     output = f_out.getvalue() + f_err.getvalue()
@@ -55,6 +55,10 @@ async def test_internal_mode(anyio_backend):
     if not api_key:
         pytest.skip("no API key to test with")
 
+    from src.llm.providers.local_provider import LocalProvider
+    if not LocalProvider().is_available():
+        pytest.skip("Local LLM (Ollama) not available")
+
     # Even with API key, internal mode should use local
     agent = BookMateAgent(openai_api_key=api_key, internal_mode=True)
 
@@ -80,13 +84,17 @@ async def test_ephemeral_internal_mode(anyio_backend):
     if not api_key:
         pytest.skip("no API key")
 
+    from src.llm.providers.local_provider import LocalProvider
+    if not LocalProvider().is_available():
+        pytest.skip("Local LLM (Ollama) not available")
+
     f_out = io.StringIO()
     f_err = io.StringIO()
 
     with redirect_stdout(f_out), redirect_stderr(f_err):
         agent = BookMateAgent(openai_api_key=api_key, ephemeral=True, internal_mode=True)
         await agent.connect_to_mcp_server()
-        response, _, _ = await agent.chat("Test query")
+        response, _, _, _ = await agent.chat("Test query")
         await agent.close()
 
     output = f_out.getvalue() + f_err.getvalue()
