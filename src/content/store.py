@@ -1,5 +1,6 @@
 import json
 import contextlib
+from typing import Any
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 from src.content.db import DatabaseManager
@@ -28,7 +29,7 @@ class PgresStore:
             # Use the pool
             return DatabaseManager.get_connection()
 
-    def execute(self, query: str, params: tuple = None, fetch: str = None, commit: bool = False):
+    def execute(self, query: str, params: tuple = None, fetch: str = None, commit: bool = False) -> Any:
         """
         Simplified execution of a query.
         - fetch: 'one', 'all', or None
@@ -97,6 +98,64 @@ class PgresStore:
             conn.commit()
         return deleted
 
+    def delete_document_full(self, slug: str) -> tuple[bool, str, int]:
+        """
+        Delete a document from PostgreSQL and Qdrant.
+
+        Returns:
+            (success, message, chunks_deleted)
+        """
+        result = self.execute(
+            "SELECT title, num_chunks FROM documents WHERE slug = %s",
+            (slug,), fetch="one",
+        )
+        if not result:
+            return False, f"Document '{slug}' not found", 0
+
+        doc_title = result[0]
+        deleted_chunks = result[1] or 0
+
+        # Delete from PostgreSQL (cascade handles all child tables)
+        self.delete_document(slug)
+
+        # Delete from Qdrant
+        qdrant_success = True
+        qdrant_error = ""
+        try:
+            import os
+            from qdrant_client import QdrantClient, models
+
+            qdrant_host = os.getenv("QDRANT_HOST", "localhost")
+            qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
+            client = QdrantClient(host=qdrant_host, port=qdrant_port)
+            client.delete(
+                collection_name="book_chunks",
+                points_selector=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="id",
+                            match=models.MatchText(text=slug),
+                        )
+                    ]
+                ),
+            )
+        except Exception as e:
+            qdrant_success = False
+            qdrant_error = str(e)
+
+        if qdrant_success:
+            return (
+                True,
+                f"[SUCCESS] Deleted '{doc_title}' ({deleted_chunks} chunks)",
+                deleted_chunks,
+            )
+        else:
+            return (
+                True,
+                f"[WARNING] Document '{doc_title}' deleted from DB, but Qdrant cleanup failed: {qdrant_error}",
+                deleted_chunks,
+            )
+
     def _sanitize_metadata(self, metadata: dict) -> dict:
         """Remove null bytes from metadata that PostgreSQL JSONB can't handle."""
         if not metadata:
@@ -152,7 +211,7 @@ class PgresStore:
 
     def store_summaries(
         self, doc_identifier: int | str, chapter_summaries: list, document_summary: str
-    ):
+    ) -> None:
         """Store chapter and document summaries."""
         doc_id = self._resolve_doc_id(doc_identifier)
         if not doc_id:
@@ -225,7 +284,7 @@ class PgresStore:
         )
         return row[0] if row else None
 
-    def store_bm25_index(self, term_freqs: list[tuple[str, str, int, int]], doc_lens: list[tuple[str, int, int]]):
+    def store_bm25_index(self, term_freqs: list[tuple[str, str, int, int]], doc_lens: list[tuple[str, int, int]]) -> None:
         """Store BM25 term frequencies and document lengths in bulk.
 
         Args:
@@ -257,7 +316,7 @@ class PgresStore:
                 )
             conn.commit()
 
-    def get_bm25_stats(self, terms: list[str], doc_slug: str = None):
+    def get_bm25_stats(self, terms: list[str], doc_slug: str = None) -> dict[str, Any]:
         """Retrieve statistics needed for BM25 scoring."""
         # Resolve slug -> doc_id once for all queries
         doc_id = self._resolve_doc_id(doc_slug) if doc_slug else None
@@ -321,7 +380,7 @@ class PgresStore:
 
     # ── Ingest job tracking ──────────────────────────────────────────
 
-    def create_ingest_job(self, job_id: str, slug: str, title: str, doc_type: str):
+    def create_ingest_job(self, job_id: str, slug: str, title: str, doc_type: str) -> None:
         """Record a new ingestion job as 'running'."""
         self.execute(
             """
@@ -332,7 +391,7 @@ class PgresStore:
             commit=True,
         )
 
-    def complete_ingest_job(self, job_id: str, result_summary: str):
+    def complete_ingest_job(self, job_id: str, result_summary: str) -> None:
         """Mark a job as completed with a one-line summary."""
         self.execute(
             """
@@ -344,7 +403,7 @@ class PgresStore:
             commit=True,
         )
 
-    def fail_ingest_job(self, job_id: str, error_message: str):
+    def fail_ingest_job(self, job_id: str, error_message: str) -> None:
         """Mark a job as failed with the error message."""
         self.execute(
             """
@@ -381,3 +440,5 @@ class PgresStore:
             "created_at": row[7],
             "completed_at": row[8],
         }
+
+    # Note operations have been moved to src/content/note_store.py (NoteStore class)

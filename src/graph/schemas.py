@@ -67,5 +67,10 @@ DOC_TYPE_SCHEMAS = {
         "entity_types": ["Metric", "Company", "Trend", "Risk", "Strategy"],
         "relationship_types": ["increases", "decreases", "impacts", "correlated_with"],
         "focus": "Key performance indicators, trends, and causal factors."
+    },
+    "note": {
+        "entity_types": ["Person", "Concept", "Idea", "Question", "Insight"],
+        "relationship_types": ["relates_to", "contradicts", "supports", "extends", "questions"],
+        "focus": "Key ideas, insights, questions raised, and how they connect to other concepts or entities."
     }
 }

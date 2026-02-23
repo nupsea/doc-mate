@@ -214,8 +214,7 @@ indexes/
 hf_cache/
 .gemini
 
-# Architecture and implementation documentation
-docs/*.md
+# Notebook scratch files
 notebooks/*.md
 TEST*.md
 

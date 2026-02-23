@@ -17,6 +17,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import pytest
 
 sys.path.append(os.getcwd())
 
@@ -336,7 +337,9 @@ def test_episode_context_in_aggregator():
 # Phase 4: Arc Summary Generation
 # ---------------------------------------------------------------------------
 
-async def test_arc_summary_generation():
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ["asyncio"])
+async def test_arc_summary_generation(anyio_backend):
     """generate_arc_summaries produces valid arc summary dicts."""
     print("\n[TEST] Phase 4: Arc summary generation")
 
@@ -460,7 +463,7 @@ async def main():
 
     for test in tests_async:
         try:
-            await test()
+            await test("asyncio")
             passed += 1
         except AssertionError as e:
             failed += 1

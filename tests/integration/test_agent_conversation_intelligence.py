@@ -65,7 +65,7 @@ async def test_conversation_intelligence():
         print(f"Query: '{test['query']}'")
         
         try:
-            response, _, _ = await agent.chat(test['query'])
+            response, _, _, _ = await agent.chat(test['query'])
             print(f"Response (preview): {response[:250]}...")
             
             content_lower = response.lower()

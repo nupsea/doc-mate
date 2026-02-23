@@ -2,6 +2,7 @@
 Doc-Mate Agent using LangGraph for orchestration.
 """
 
+import logging
 from typing import Optional, List, Dict
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 
@@ -12,6 +13,8 @@ from src.monitoring.judge import ResponseJudge
 from src.monitoring.tracer import init_phoenix_tracing
 from src.mcp_client.prompts import get_system_prompt
 from src.flows.agent_graph import agent_graph
+
+logger = logging.getLogger(__name__)
 
 
 class DocMateAgent:
@@ -33,12 +36,31 @@ class DocMateAgent:
         self.router = ModelRouter()
         # Strictly disable fallback if internal_mode is requested
         self.llm_provider = self.router.get_provider(
-            self.provider_name, 
+            self.provider_name,
             fallback=not internal_mode
         )
 
+        # Only override model if it matches the actual provider.
+        # When fallback occurs (e.g. local -> openai), the user-selected
+        # model name (e.g. "granite3.2:8b") is incompatible with the
+        # fallback provider and must not be applied.
+        self.fallback_notice = None
         if model:
-            self.llm_provider.model = model
+            if self.llm_provider.provider_name == self.provider_name:
+                self.llm_provider.model = model
+            else:
+                self.fallback_notice = (
+                    f"Local LLM unavailable -- using {self.llm_provider.provider_name}/{self.llm_provider.model} instead."
+                )
+                logger.warning(
+                    "Provider fallback occurred (%s -> %s), "
+                    "using fallback provider's default model '%s' "
+                    "instead of requested '%s'",
+                    self.provider_name,
+                    self.llm_provider.provider_name,
+                    self.llm_provider.model,
+                    model,
+                )
 
         self.config = LLMConfig.from_env()
         self.ephemeral = ephemeral
@@ -84,7 +106,7 @@ class DocMateAgent:
             doc_types = {doc_type for _, _, _, doc_type in docs if doc_type}
             return doc_list_str, title_to_slug, doc_types
         except Exception as e:
-            print(f"[WARN] Could not load document list: {e}")
+            logger.warning("Could not load document list: %s", e)
             return "Document list unavailable.", {}, {"book"}
 
     def _to_langchain_messages(self, history: List[Dict]) -> List[BaseMessage]:
@@ -123,31 +145,34 @@ class DocMateAgent:
         user_message: str,
         conversation_history: list = None,
         selected_doc: str = None,
-    ) -> tuple[str, list, str]:
+    ) -> tuple[str, list, str, list]:
         """
         Send a message and let LangGraph handle the reasoning/tool loop.
+
+        Returns:
+            (response_text, conversation_history, query_id, source_refs)
         """
         TimerClass = NoOpQueryTimer if self.ephemeral else QueryTimer
-        
+
         with TimerClass(user_message, None) as timer:
             try:
                 # 1. Prepare conversation and prompts
                 available_docs, _, doc_types = self._get_available_documents()
                 use_simple = self.llm_provider.provider_name == "local"
                 system_content = get_system_prompt(available_docs, doc_types=doc_types, use_simple=use_simple)
-                
+
                 if not conversation_history:
                     conversation_history = [{"role": "system", "content": system_content}]
                 elif conversation_history[0].get("role") != "system":
                     conversation_history = [{"role": "system", "content": system_content}] + conversation_history
-                
+
                 conversation_history.append({"role": "user", "content": user_message})
-                
+
                 # 2. Convert to LangChain format
                 messages = self._to_langchain_messages(conversation_history)
-                
+
                 # 3. Invoke the Graph
-                print(f"[AGENT] Invoking LangGraph with provider={self.llm_provider.provider_name}...")
+                logger.info("Invoking LangGraph with provider=%s", self.llm_provider.provider_name)
                 result = await agent_graph.ainvoke({
                     "messages": messages,
                     "provider": self.llm_provider.provider_name,
@@ -155,23 +180,25 @@ class DocMateAgent:
                     "doc_types": doc_types,
                     "selected_doc_slug": selected_doc or "",
                 })
-                
-                # 4. Extract final message
+
+                # 4. Extract final message and source references
                 final_msg = result["messages"][-1].content
-                
+                source_refs = result.get("source_refs", [])
+
                 # 5. Track tool calls in metrics (optional, for backward compatibility with dashboard)
                 for msg in result["messages"]:
                     if isinstance(msg, AIMessage) and msg.tool_calls:
                         for tc in msg.tool_calls:
                             timer.add_tool_call(tc["name"])
 
-                return self._finalize_response(final_msg, user_message, conversation_history, timer)
+                resp, hist, qid = self._finalize_response(final_msg, user_message, conversation_history, timer)
+                return resp, hist, qid, source_refs
 
             except Exception as e:
                 import traceback
                 traceback.print_exc()
                 error_msg = f"Error: {str(e)}"
-                return error_msg, conversation_history or [], timer.query_id
+                return error_msg, conversation_history or [], timer.query_id, []
 
     async def connect_to_mcp_server(self):
         """Deprecated compatibility method - no-op in LangGraph."""

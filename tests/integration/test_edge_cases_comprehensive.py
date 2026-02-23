@@ -15,7 +15,7 @@ async def test_empty_query():
     await agent.connect_to_mcp_server()
 
     try:
-        response, _, _ = await agent.chat("")
+        response, _, _, _, _ = await agent.chat("")
         await agent.close()
 
         # Should handle gracefully, not crash
@@ -38,7 +38,7 @@ async def test_nonexistent_book():
     await agent.connect_to_mcp_server()
 
     try:
-        response, _, _ = await agent.chat("What does the book 'XYZ_NONEXISTENT_123' say about time?")
+        response, _, _, _, _ = await agent.chat("What does the book 'XYZ_NONEXISTENT_123' say about time?")
         await agent.close()
 
         # Should handle gracefully, possibly saying book not found
@@ -66,7 +66,7 @@ async def test_very_long_query():
     ) + "?"
 
     try:
-        response, _, _ = await agent.chat(long_query)
+        response, _, _, _, _ = await agent.chat(long_query)
         await agent.close()
 
         print(f"Query length: {len(long_query)} characters")
@@ -90,15 +90,15 @@ async def test_multi_turn_conversation():
 
     try:
         # First turn
-        response1, _, _ = await agent.chat("What is the Iliad about?")
+        response1, _, _, _ = await agent.chat("What is the Iliad about?")
         print(f"Turn 1 response length: {len(response1)}")
 
         # Second turn - follow-up question
-        response2, _, _ = await agent.chat("Who are the main characters?")
+        response2, _, _, _ = await agent.chat("Who are the main characters?")
         print(f"Turn 2 response length: {len(response2)}")
 
         # Third turn - another follow-up
-        response3, _, _ = await agent.chat("What happens to Achilles?")
+        response3, _, _, _ = await agent.chat("What happens to Achilles?")
         print(f"Turn 3 response length: {len(response3)}")
 
         await agent.close()
@@ -129,7 +129,7 @@ async def test_special_characters_query():
 
     try:
         # Query with special characters
-        response, _, _ = await agent.chat("What does the Gita say about 'dharma' & duty?")
+        response, _, _, _, _ = await agent.chat("What does the Gita say about 'dharma' & duty?")
         await agent.close()
 
         print(f"Response length: {len(response)}")
@@ -160,7 +160,7 @@ async def test_concurrent_searches():
 
         results = []
         for query in queries:
-            response, _, _ = await agent.chat(query)
+            response, _, _, _, _ = await agent.chat(query)
             results.append(response)
             print(f"Query '{query[:30]}...' -> Response length: {len(response)}")
 
@@ -192,7 +192,7 @@ async def test_ambiguous_book_reference():
 
     try:
         # Ambiguous - could be multiple books
-        response, _, _ = await agent.chat("What do the ancient Greeks say about heroism?")
+        response, _, _, _, _ = await agent.chat("What do the ancient Greeks say about heroism?")
         await agent.close()
 
         print(f"Response length: {len(response)}")
@@ -216,7 +216,7 @@ async def test_json_injection_attempt():
 
     try:
         # Query that looks like JSON
-        response, _, _ = await agent.chat('{"query": "hack", "book": "all"}')
+        response, _, _, _, _ = await agent.chat('{"query": "hack", "book": "all"}')
         await agent.close()
 
         # Should treat as regular text query, not crash

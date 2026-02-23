@@ -21,10 +21,10 @@ class GraphRetriever:
         if self._embedder is None:
             try:
                 from sentence_transformers import SentenceTransformer
-                logger.info("[GRAPH] Loading SentenceTransformer for entity semantic search...")
+                logger.info("Loading SentenceTransformer for entity semantic search...")
                 self._embedder = SentenceTransformer("BAAI/bge-small-en", device="cpu")
             except ImportError:
-                logger.warning("[GRAPH] sentence-transformers not available. Semantic search disabled.")
+                logger.warning("sentence-transformers not available. Semantic search disabled.")
         return self._embedder
 
     def _extract_query_entities(self, query: str, doc_id: int, hint_entities: List[str] = None) -> List[int]:
@@ -89,10 +89,10 @@ class GraphRetriever:
                         if sim > THRESHOLD:
                             eid = desc_rows[i][0]
                             if eid not in found_ids:
-                                logger.info(f"[GRAPH] Semantic match: '{desc_rows[i][1]}' (score: {sim:.2f})")
+                                logger.debug("Semantic match: '%s' (score: %.2f)", desc_rows[i][1], sim)
                                 found_ids.append(eid)
             except Exception as e:
-                logger.warning(f"[GRAPH] Entity semantic matching failed: {e}")
+                logger.warning("Entity semantic matching failed: %s", e)
                 
         return found_ids
 

@@ -336,7 +336,7 @@ class PostgresGraphStore(PgresStore):
         )
         return [row[0] for row in rows] if rows else []
 
-    def delete_graph_for_doc(self, doc_id: int):
+    def delete_graph_for_doc(self, doc_id: int) -> None:
         """
         Delete all graph data for a document.
         (Note: Cascade delete on documents table usually handles this, 

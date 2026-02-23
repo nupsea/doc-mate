@@ -31,7 +31,7 @@ async def test_phoenix_disabled_in_ephemeral(anyio_backend):
 
     # Try a simple operation to make sure nothing breaks
     await agent.connect_to_mcp_server()
-    response, _, _ = await agent.chat("What is 2+2?")
+    response, _, _, _ = await agent.chat("What is 2+2?")
     await agent.close()
 
     print("✓ Agent operations work without Phoenix")

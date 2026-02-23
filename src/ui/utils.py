@@ -7,19 +7,19 @@ from src.content.store import PgresStore
 
 
 def get_available_documents(include_ephemeral: bool = True):
-    """Fetch list of documents from database with slug, title, author, chunks, and added_at."""
+    """Fetch list of documents from database with slug, title, author, chunks, added_at, and doc_type."""
     try:
         store = PgresStore()
         query = """
-            SELECT slug, title, author, num_chunks, added_at
+            SELECT slug, title, author, num_chunks, added_at, doc_type
             FROM documents
         """
-        
+
         if not include_ephemeral:
             query += " WHERE is_ephemeral = FALSE"
-            
+
         query += " ORDER BY added_at DESC"
-        
+
         return store.execute(query, fetch="all")
     except Exception as e:
         print(f"Error fetching documents: {e}")
@@ -166,7 +166,9 @@ def format_document_list(docs):
         return []
 
     data = []
-    for slug, title, author, num_chunks, added_at in docs:
+    for row in docs:
+        # Handle both old (5-col) and new (6-col with doc_type) format
+        slug, title, author, num_chunks, added_at = row[:5]
         # Format date
         if added_at:
             date_str = added_at.strftime("%Y-%m-%d %H:%M")
@@ -185,70 +187,31 @@ def format_document_list(docs):
 
     return data
 
+
+def format_doc_dropdown_choices(docs):
+    """Format document list as dropdown choices with [Note] prefix for notes."""
+    choices = [("Select a doc...", "none")]
+    for row in docs:
+        slug, title = row[0], row[1]
+        doc_type = row[5] if len(row) > 5 else "book"
+        label = f"[Note] {title}" if doc_type == "note" else title
+        choices.append((label, slug))
+    return choices
+
 # Compatibility alias
 format_book_list = format_document_list
 
 
 def delete_document(slug: str) -> tuple[bool, str, int]:
     """
-    Delete a document and all its associated data from:
-    - PostgreSQL (documents row + cascaded summaries/graph + explicit BM25 cleanup)
-    - Qdrant vector store
+    Delete a document and all its associated data from PostgreSQL and Qdrant.
 
     Returns:
         (success, message, chunks_deleted)
     """
     try:
-        from src.search.hybrid import FusionRetriever
-        from qdrant_client import models
-
         store = PgresStore()
-
-        # Check if document exists and get info
-        result = store.execute("SELECT title, num_chunks FROM documents WHERE slug = %s", (slug,), fetch="one")
-        if not result:
-            return False, f"Document '{slug}' not found", 0
-
-        doc_title = result[0]
-        deleted_chunks = result[1] or 0
-
-        # Delete from PostgreSQL (handles cascade + BM25 cleanup)
-        store.delete_document(slug)
-
-        # Delete from Qdrant
-        qdrant_success = True
-        qdrant_error = ""
-        try:
-            retriever = FusionRetriever()
-            retriever.vec.qdrant.delete(
-                collection_name=retriever.vec.COLLECTION,
-                points_selector=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="id",
-                            match=models.MatchText(text=slug)
-                        )
-                    ]
-                ),
-            )
-        except Exception as e:
-            qdrant_success = False
-            qdrant_error = str(e)
-
-        # Build success message
-        if qdrant_success:
-            return (
-                True,
-                f"[SUCCESS] Deleted '{doc_title}' ({deleted_chunks} chunks)",
-                deleted_chunks,
-            )
-        else:
-            return (
-                True,
-                f"[WARNING] Document '{doc_title}' deleted from DB, but Qdrant cleanup failed: {qdrant_error}",
-                deleted_chunks,
-            )
-
+        return store.delete_document_full(slug)
     except Exception as e:
         return False, f"[ERROR] Failed to delete document: {str(e)}", 0
 

@@ -673,7 +673,7 @@ def create_ingest_interface():
                     gr.update(visible=False),
                 )
 
-            doc_slug, doc_title, doc_author, num_chunks, _ = doc_info
+            doc_slug, doc_title, doc_author, num_chunks, *_ = doc_info
             author_str = f" by {doc_author}" if doc_author else ""
 
             confirm_msg = (

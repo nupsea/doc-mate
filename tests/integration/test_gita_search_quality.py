@@ -16,7 +16,7 @@ async def test_gita_search_arjuna():
     await agent.connect_to_mcp_server()
 
     # Search for Arjuna
-    response, _, _ = await agent.chat("What does the Gita say about Arjuna?")
+    response, _, _, _ = await agent.chat("What does the Gita say about Arjuna?")
 
     await agent.close()
 
@@ -61,7 +61,7 @@ async def test_gita_search_draupadi():
     await agent.connect_to_mcp_server()
 
     # Search for Draupadi (doesn't exist in Gita)
-    response, _, _ = await agent.chat("What is Draupadi's significance in the Gita?")
+    response, _, _, _ = await agent.chat("What is Draupadi's significance in the Gita?")
 
     await agent.close()
 

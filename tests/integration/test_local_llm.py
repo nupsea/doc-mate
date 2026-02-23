@@ -90,7 +90,7 @@ async def test_local_llm():
         print("-" * 80)
 
         try:
-            response_text, _, _ = await agent.chat(test['query'])
+            response_text, _, _, _ = await agent.chat(test['query'])
 
             print("Response received")
             print(f"First 200 chars: {response_text[:200]}...")

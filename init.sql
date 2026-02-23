@@ -11,8 +11,9 @@ CREATE TABLE IF NOT EXISTS documents (
     num_chars INT,
     doc_type VARCHAR(20) DEFAULT 'book',
     metadata JSONB DEFAULT '{}'::jsonb,
+    is_ephemeral BOOLEAN DEFAULT FALSE,
     added_at TIMESTAMP DEFAULT NOW(),
-    CONSTRAINT valid_doc_type CHECK (doc_type IN ('book', 'script', 'conversation', 'tech_doc', 'report'))
+    CONSTRAINT valid_doc_type CHECK (doc_type IN ('book', 'script', 'conversation', 'tech_doc', 'report', 'note'))
 );
 
 -- Indexes for multi-format support
